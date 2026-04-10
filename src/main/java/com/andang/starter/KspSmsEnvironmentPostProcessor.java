@@ -29,7 +29,7 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
         properties = new KspSmsProperties();
         loadPropertiesFromEnvironment(environment, properties);
 
-        System.out.println("KSP SMS properties loaded: url=" + properties.getUrl() + ", domain=" + properties.getDomain() + ", appKey=" + properties.getAppKey() + ", enabled=" + properties.isEnabled() + ", cipherPrefix=" + properties.getCipherPrefix());
+        System.out.println("KSP SMS properties loaded: url=" + properties.getUrl() + ", domain=" + properties.getDomain() + ", appKey=[REDACTED], enabled=" + properties.isEnabled() + ", cipherPrefix=" + properties.getCipherPrefix());
 
         if (!properties.isEnabled()) {
             System.out.println("KSP SMS Starter is disabled");
@@ -44,9 +44,9 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
         String apiKey = environment.getProperty("app.api.key");
 
         System.out.println("Direct property checks:");
-        System.out.println("spring.datasource.username = " + dbUsername);
-        System.out.println("spring.datasource.password = " + dbPassword);
-        System.out.println("app.api.key = " + apiKey);
+        System.out.println("spring.datasource.username = " + (dbUsername != null && dbUsername.startsWith(properties.getCipherPrefix()) ? dbUsername : "[REDACTED]"));
+        System.out.println("spring.datasource.password = " + (dbPassword != null && dbPassword.startsWith(properties.getCipherPrefix()) ? dbPassword : "[REDACTED]"));
+        System.out.println("app.api.key = " + (apiKey != null && apiKey.startsWith(properties.getCipherPrefix()) ? apiKey : "[REDACTED]"));
 
         Map<String, Object> processedProperties = new HashMap<>();
         System.out.println("Calling processProperties method");
