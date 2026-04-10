@@ -1,0 +1,26 @@
+server:
+  port: 8081
+
+ksp:
+  sms:
+    url: https://192.168.0.135
+    domain: 1
+    appKey: ad6100957ede7d0c6f090de713da07cbd5
+    appSecret: f04e03dba233b36c0eefd68f37de0d60
+    version: ""
+    enabled: true
+    cipherPrefix: SMS{
+    jsonKey: value
+
+spring:
+  datasource:
+    username: SMS{mysql00:username}
+    password: SMS{mysql00:password}
+
+app:
+  api:
+    key: SMS{static00}
+
+logging:
+  level:
+    com.andang.starter: info
