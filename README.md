@@ -72,6 +72,26 @@ spring:
 
 Starter会自动根据指定的jsonKey（如username、password）从JSON中提取对应的值。
 
+### 静态凭据
+
+当从SMS获取到的凭据是静态值（非JSON格式）时，如：
+```
+andangSafe123456
+```
+
+Starter会直接使用该静态值作为解密结果。
+
+#### 静态凭据示例
+
+```yaml
+# 配置静态凭据
+app:
+  api:
+    key: SMS{static00}
+```
+
+当SMS系统返回的`static00`标签对应的值是静态字符串（如"andangSafe123456"）时，Starter会直接将该值注入到`app.api.key`配置中。
+
 ## 发布到JitPack.io
 
 1. 在GitHub上创建一个仓库
@@ -96,3 +116,103 @@ Starter会自动根据指定的jsonKey（如username、password）从JSON中提�
 ## 许可证
 
 本项目采用 [MIT 许可证](LICENSE) 开源。
+
+## 项目结构
+
+```
+ksp-sms-spring-boot-starter/
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   ├── com/andang/
+│   │   │   │   ├── CredentialClient.java       # 凭据管理客户端
+│   │   │   │   └── util/                        # 工具类
+│   │   │   └── com/andang/starter/
+│   │   │       ├── KspSmsEnvironmentPostProcessor.java  # 环境后置处理器
+│   │   │       ├── KspSmsAutoConfiguration.java        # 自动配置类
+│   │   │       └── KspSmsProperties.java               # 配置属性类
+│   │   └── resources/
+│   │       └── META-INF/
+│   │           └── spring.factories                  # Spring Boot 自动配置
+│   └── test/                                       # 测试项目
+│       ├── src/
+│       │   ├── main/
+│       │   │   ├── java/
+│       │   │   │   └── com/test/                  # 测试代码
+│       │   │   └── resources/
+│       │   │       └── application.yml           # 测试配置文件
+│       │   └── pom.xml                           # 测试项目依赖
+├── pom.xml                                         # 主项目依赖
+├── README.md                                       # 项目说明
+└── LICENSE                                         # 许可证文件
+```
+
+## 示例代码
+
+### 在业务代码中使用解密后的凭据
+
+```java
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class TestController {
+    
+    // 自动注入解密后的数据库用户名
+    @Value("${spring.datasource.username}")
+    private String dbUsername;
+    
+    // 自动注入解密后的数据库密码
+    @Value("${spring.datasource.password}")
+    private String dbPassword;
+    
+    // 自动注入解密后的API密钥
+    @Value("${app.api.key}")
+    private String apiKey;
+    
+    @GetMapping("/test")
+    public String test() {
+        // 这里可以使用解密后的凭据进行业务操作
+        return "Database Username: " + dbUsername + "\n" +
+               "Database Password: [REDACTED]\n" + // 注意：实际使用中不要输出密码
+               "API Key: [REDACTED]";              // 注意：实际使用中不要输出密钥
+    }
+}
+```
+
+## 故障排查
+
+### 常见问题及解决方案
+
+1. **构建失败**
+   - 检查 `pom.xml` 配置是否正确
+   - 确保 Maven 依赖能够正常下载
+
+2. **解密失败**
+   - 检查网络连接是否正常，能够访问 KSP SMS 系统
+   - 确保 `appKey` 和 `appSecret` 配置正确
+   - 确保配置的标签（如 `mysql00`）在 KSP SMS 系统中存在
+
+3. **敏感信息泄露**
+   - 检查日志配置，确保敏感信息不会被输出
+   - 实际使用中不要在代码中打印或记录敏感信息
+
+4. **JitPack 构建失败**
+   - 检查 GitHub 仓库是否公开
+   - 确保创建了有效的 Tag 或 Release
+   - 查看 JitPack 构建日志，了解具体失败原因
+
+## 贡献指南
+
+欢迎贡献代码、报告问题或提出建议！
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'Add some amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 打开 Pull Request
+
+## 联系方式
+
+如有问题或建议，请通过 GitHub Issues 与我们联系。
