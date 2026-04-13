@@ -42,11 +42,15 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
         String dbUsername = environment.getProperty("spring.datasource.username");
         String dbPassword = environment.getProperty("spring.datasource.password");
         String apiKey = environment.getProperty("app.api.key");
+        String apiSecret = environment.getProperty("app.api.secret");
+        String apiToken = environment.getProperty("app.api.token");
 
         System.out.println("Direct property checks:");
         System.out.println("spring.datasource.username = " + (dbUsername != null && dbUsername.startsWith(properties.getCipherPrefix()) ? dbUsername : "[REDACTED]"));
         System.out.println("spring.datasource.password = " + (dbPassword != null && dbPassword.startsWith(properties.getCipherPrefix()) ? dbPassword : "[REDACTED]"));
         System.out.println("app.api.key = " + (apiKey != null && apiKey.startsWith(properties.getCipherPrefix()) ? apiKey : "[REDACTED]"));
+        System.out.println("app.api.secret = " + (apiSecret != null && apiSecret.startsWith(properties.getCipherPrefix()) ? apiSecret : "[REDACTED]"));
+        System.out.println("app.api.token = " + (apiToken != null && apiToken.startsWith(properties.getCipherPrefix()) ? apiToken : "[REDACTED]"));
 
         Map<String, Object> processedProperties = new HashMap<>();
         System.out.println("Calling processProperties method");
@@ -77,45 +81,120 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
     private void processProperties(ConfigurableEnvironment environment, Map<String, Object> processedProperties) {
         String cipherPrefix = properties.getCipherPrefix();
 
-        // 直接检查所有可能的属性，无论属性源的类型
-        String[] propertyKeys = {
-            "spring.datasource.username",
-            "spring.datasource.password",
-            "app.api.key"
-        };
+        System.out.println("Starting processProperties method");
 
-        for (String key : propertyKeys) {
+        // 遍历所有属性源，自动扫描所有以SMS{开头的属性
+        System.out.println("Number of property sources: " + environment.getPropertySources().size());
+        for (PropertySource<?> propertySource : environment.getPropertySources()) {
+            System.out.println("Processing property source: " + propertySource.getName() + ", type: " + propertySource.getClass().getName());
+            
             try {
-                Object value = environment.getProperty(key);
-                if (value instanceof String) {
-                    String stringValue = (String) value;
-                    System.out.println("Checking property: " + key + " = " + stringValue);
+                // 检查属性源是否是MapPropertySource或其子类
+                if (propertySource instanceof MapPropertySource) {
+                    MapPropertySource mapPropertySource = (MapPropertySource) propertySource;
+                    Map<String, Object> sourceMap = mapPropertySource.getSource();
+                    System.out.println("Property source is MapPropertySource with " + sourceMap.size() + " properties");
                     
-                    if (stringValue.startsWith(cipherPrefix) && stringValue.endsWith("}")) {
-                        // 处理密文，格式为 SMS{密钥ID} 或 SMS{密钥ID:jsonKey}
-                        String content = stringValue.substring(cipherPrefix.length(), stringValue.length() - 1);
-                        String label;
-                        String jsonKey = properties.getJsonKey();
-
-                        // 检查是否包含冒号，用于指定JSON中的key
-                        if (content.contains(":")) {
-                            String[] parts = content.split(":");
-                            label = parts[0];
-                            jsonKey = parts[1];
-                        } else {
-                            label = content;
+                    // 遍历属性源中的所有属性
+                    for (Map.Entry<String, Object> entry : sourceMap.entrySet()) {
+                        String key = entry.getKey();
+                        Object value = entry.getValue();
+                        
+                        String stringValue = null;
+                        if (value instanceof String) {
+                            stringValue = (String) value;
+                        } else if (value instanceof CharSequence) {
+                            // 处理OriginTrackedValue等CharSequence类型
+                            stringValue = value.toString();
                         }
+                        
+                        if (stringValue != null) {
+                            System.out.println("Checking property: " + key + ", value: " + stringValue);
+                            
+                            // 只检查以cipherPrefix开头且以}结尾的属性
+                            if (stringValue.startsWith(cipherPrefix) && stringValue.endsWith("}")) {
+                                System.out.println("Found encrypted property: " + key + " = " + stringValue);
+                                
+                                // 处理密文，格式为 SMS{密钥ID} 或 SMS{密钥ID:jsonKey}
+                                String content = stringValue.substring(cipherPrefix.length(), stringValue.length() - 1);
+                                String label;
+                                String jsonKey = properties.getJsonKey();
 
-                        String plainText = decryptProperty(label, jsonKey);
-                        processedProperties.put(key, plainText);
-                        // 不输出解密后的值，避免敏感信息泄露
-                        System.out.println("Decrypted property: " + key + ", value: [REDACTED]");
+                                // 检查是否包含冒号，用于指定JSON中的key
+                                if (content.contains(":")) {
+                                    String[] parts = content.split(":");
+                                    label = parts[0];
+                                    jsonKey = parts[1];
+                                } else {
+                                    label = content;
+                                }
+
+                                String plainText = decryptProperty(label, jsonKey);
+                                processedProperties.put(key, plainText);
+                                // 不输出解密后的值，避免敏感信息泄露
+                                System.out.println("Decrypted property: " + key + ", value: [REDACTED]");
+                            }
+                        } else if (value instanceof Map) {
+                            // 处理嵌套的Map属性
+                            processNestedMap(key, (Map<?, ?>) value, cipherPrefix, processedProperties);
+                        }
                     }
+                } else {
+                    System.out.println("Property source is not MapPropertySource, skipping");
                 }
             } catch (Exception e) {
-                System.out.println("Failed to process property: " + key + ", error: " + e.getMessage());
+                System.out.println("Failed to process property source: " + propertySource.getName() + ", error: " + e.getMessage());
                 e.printStackTrace();
-                // 继续处理下一个属性
+                // 继续处理下一个属性源
+            }
+        }
+        
+        System.out.println("processProperties method finished, processed " + processedProperties.size() + " properties");
+    }
+
+    /**
+     * 处理嵌套的Map属性，递归检查所有属性值
+     */
+    private void processNestedMap(String parentKey, Map<?, ?> map, String cipherPrefix, Map<String, Object> processedProperties) {
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            String key = parentKey + "." + entry.getKey().toString();
+            Object value = entry.getValue();
+            
+            String stringValue = null;
+            if (value instanceof String) {
+                stringValue = (String) value;
+            } else if (value instanceof CharSequence) {
+                // 处理OriginTrackedValue等CharSequence类型
+                stringValue = value.toString();
+            }
+            
+            if (stringValue != null) {
+                // 只检查以cipherPrefix开头且以}结尾的属性
+                if (stringValue.startsWith(cipherPrefix) && stringValue.endsWith("}")) {
+                    System.out.println("Found encrypted property: " + key + " = " + stringValue);
+                    
+                    // 处理密文，格式为 SMS{密钥ID} 或 SMS{密钥ID:jsonKey}
+                    String content = stringValue.substring(cipherPrefix.length(), stringValue.length() - 1);
+                    String label;
+                    String jsonKey = properties.getJsonKey();
+
+                    // 检查是否包含冒号，用于指定JSON中的key
+                    if (content.contains(":")) {
+                        String[] parts = content.split(":");
+                        label = parts[0];
+                        jsonKey = parts[1];
+                    } else {
+                        label = content;
+                    }
+
+                    String plainText = decryptProperty(label, jsonKey);
+                    processedProperties.put(key, plainText);
+                    // 不输出解密后的值，避免敏感信息泄露
+                    System.out.println("Decrypted property: " + key + ", value: [REDACTED]");
+                }
+            } else if (value instanceof Map) {
+                // 递归处理嵌套的Map
+                processNestedMap(key, (Map<?, ?>) value, cipherPrefix, processedProperties);
             }
         }
     }

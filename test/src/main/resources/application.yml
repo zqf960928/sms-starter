@@ -20,6 +20,12 @@ spring:
 app:
   api:
     key: SMS{static00}
+    secret: SMS{static01}
+    token: SMS{static02}
+  test:
+    aaa: SMS{AAA}
+    bbb: SMS{BBB}
+    ccc: SMS{CCC:customKey}
 
 logging:
   level:
