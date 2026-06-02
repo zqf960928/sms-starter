@@ -1,7 +1,13 @@
 package com.andang.starter;
 
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.ConfigurableEnvironment;
+
+import javax.sql.DataSource;
 
 /**
  * KSP SMS自动配置类
@@ -13,4 +19,13 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @EnableConfigurationProperties(KspSmsProperties.class)
 public class KspSmsAutoConfiguration {
+    @Bean
+    @ConditionalOnProperty(prefix = "ksp.sms.refresh", name = "enabled", havingValue = "true")
+    public KspSmsCredentialRefreshManager kspSmsCredentialRefreshManager(
+            ConfigurableEnvironment environment,
+            KspSmsProperties properties,
+            ObjectProvider<DataSource> dataSourceProvider
+    ) {
+        return new KspSmsCredentialRefreshManager(environment, properties, dataSourceProvider);
+    }
 }

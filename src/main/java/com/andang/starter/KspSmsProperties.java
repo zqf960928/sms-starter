@@ -68,4 +68,19 @@ public class KspSmsProperties {
      * 默认值："value"
      */
     private String jsonKey = "value";
+
+    private Refresh refresh = new Refresh();
+
+    @Data
+    public static class Refresh {
+        private boolean enabled = false;
+        private long intervalSeconds = 60;
+        private long leadTimeSeconds = 300;
+        private boolean refreshStatic = false;
+        private boolean datasourceEnabled = true;
+        private boolean hikariEnabled = true;
+        private boolean validateOnRotate = false;
+        private String validationQuery = "SELECT 1";
+        private long evictDelayMs = 0;
+    }
 }

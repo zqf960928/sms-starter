@@ -1,6 +1,7 @@
 package com.andang;
  import com.andang.entity.AuthResponse;
  import com.andang.entity.CredentialDbInfo;
+import com.andang.entity.CredentialResult;
  import com.andang.entity.GetCipherResponse;
  import com.andang.util.HttpUtils;
  import com.andang.util.RsaUtils;
@@ -204,6 +205,11 @@ public class CredentialClient {
             throw new RuntimeException("请先登录认证");
         }
 
+        CredentialResult result = getCredentialResult(label);
+        return result.getContent();
+    }
+
+    public CredentialResult getCredentialResult(String label) {
         try {
             // 2.1 生成RSA密钥对
             String[] keyPair = RsaUtils.generateKeyPair();
@@ -256,7 +262,19 @@ public class CredentialClient {
             // 2.10 处理解密结果
             handleDecryptedContent(decryptedContent, response);
 
-            return decryptedContent;
+            int dbType = 0;
+            Object dbTypeObj = response.getData().get("db_type");
+            if (dbTypeObj instanceof Number) {
+                dbType = ((Number) dbTypeObj).intValue();
+            }
+
+            long expireTime = 0L;
+            Object expireObj = response.getData().get("expire_time");
+            if (expireObj instanceof Number) {
+                expireTime = ((Number) expireObj).longValue();
+            }
+
+            return new CredentialResult(decryptedContent, dbType, expireTime);
         } catch (Exception e) {
             log.error("获取凭据失败", e);
             throw new RuntimeException("获取凭据失败", e);
@@ -327,4 +345,3 @@ public class CredentialClient {
         }
     }
 }
-
