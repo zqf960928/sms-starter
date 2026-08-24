@@ -23,9 +23,9 @@ app:
     secret: SMS{static01}
     token: SMS{static02}
   test:
-    aaa: SMS{AAA}
-    bbb: SMS{BBB}
-    ccc: SMS{CCC:customKey}
+    aaa: SMS{static00}
+    bbb: SMS{static00}
+    ccc: SMS{static00}
 
 logging:
   level:
