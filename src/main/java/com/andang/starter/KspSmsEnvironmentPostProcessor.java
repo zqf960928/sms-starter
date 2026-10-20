@@ -76,6 +76,22 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
         properties.setEnabled(Boolean.parseBoolean(environment.getProperty("ksp.sms.enabled", String.valueOf(properties.isEnabled()))));
         properties.setCipherPrefix(environment.getProperty("ksp.sms.cipherPrefix", properties.getCipherPrefix()));
         properties.setJsonKey(environment.getProperty("ksp.sms.jsonKey", properties.getJsonKey()));
+        if (properties.getRefresh() == null) {
+            properties.setRefresh(new KspSmsProperties.Refresh());
+        }
+        KspSmsProperties.Refresh refresh = properties.getRefresh();
+        refresh.setEnabled(Boolean.parseBoolean(environment.getProperty("ksp.sms.refresh.enabled", String.valueOf(refresh.isEnabled()))));
+        refresh.setIntervalSeconds(Long.parseLong(environment.getProperty("ksp.sms.refresh.intervalSeconds", String.valueOf(refresh.getIntervalSeconds()))));
+        refresh.setLeadTimeSeconds(Long.parseLong(environment.getProperty("ksp.sms.refresh.leadTimeSeconds", String.valueOf(refresh.getLeadTimeSeconds()))));
+        refresh.setRefreshStatic(Boolean.parseBoolean(environment.getProperty("ksp.sms.refresh.refreshStatic", String.valueOf(refresh.isRefreshStatic()))));
+        refresh.setDatasourceEnabled(Boolean.parseBoolean(environment.getProperty("ksp.sms.refresh.datasourceEnabled", String.valueOf(refresh.isDatasourceEnabled()))));
+        refresh.setHikariEnabled(Boolean.parseBoolean(environment.getProperty("ksp.sms.refresh.hikariEnabled", String.valueOf(refresh.isHikariEnabled()))));
+        refresh.setValidateOnRotate(Boolean.parseBoolean(environment.getProperty("ksp.sms.refresh.validateOnRotate", String.valueOf(refresh.isValidateOnRotate()))));
+        refresh.setValidationQuery(environment.getProperty("ksp.sms.refresh.validationQuery", refresh.getValidationQuery()));
+        refresh.setEvictDelayMs(Long.parseLong(environment.getProperty("ksp.sms.refresh.evictDelayMs", String.valueOf(refresh.getEvictDelayMs()))));
+        refresh.setRenewTtlSeconds(Long.parseLong(environment.getProperty("ksp.sms.refresh.renewTtlSeconds", String.valueOf(refresh.getRenewTtlSeconds()))));
+        refresh.setMaxRenewFailures(Integer.parseInt(environment.getProperty("ksp.sms.refresh.maxRenewFailures", String.valueOf(refresh.getMaxRenewFailures()))));
+        refresh.setLifecycleDriven(Boolean.parseBoolean(environment.getProperty("ksp.sms.refresh.lifecycleDriven", String.valueOf(refresh.isLifecycleDriven()))));
     }
 
     private void processProperties(ConfigurableEnvironment environment, Map<String, Object> processedProperties) {
@@ -215,10 +231,9 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
                         properties.getAppSecret(),
                         properties.getVersion()
                 );
-                System.out.println("Created CredentialClient, starting login");
-                client.login();
-                System.out.println("Login successful, getting credential");
-                String decryptedContent = client.getCredential(label);
+                System.out.println("Created CredentialClient, starting startup credential resolution");
+                KspSmsStartupCredentialResolver resolver = KspSmsStartupCredentialResolver.fromClient(client, properties);
+                String decryptedContent = resolver.resolveDecryptedContent(label);
                 // 不输出解密内容，避免敏感信息泄露
                 System.out.println("Got decrypted content: [REDACTED]");
 
