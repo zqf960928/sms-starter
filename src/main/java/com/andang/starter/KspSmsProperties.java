@@ -16,9 +16,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class KspSmsProperties {
     /**
      * KSP SMS系统的服务地址
-     * 默认值：https://192.168.0.135
+     * 默认值：https://192.168.0.130:8390
      */
-    private String url = "https://192.168.0.135";
+    private String url = "https://192.168.0.130:8390";
     
     /**
      * 域ID
@@ -30,16 +30,16 @@ public class KspSmsProperties {
     /**
      * 应用密钥
      * 用于身份认证的AppKey
-     * 默认值：ad6100957ede7d0c6f090de713da07cbd5
+     * 默认值：ade3d8fec2f10c39dd7912fc59aa18ea1e
      */
-    private String appKey = "ad6100957ede7d0c6f090de713da07cbd5";
+    private String appKey = "ade3d8fec2f10c39dd7912fc59aa18ea1e";
     
     /**
      * 应用密钥
      * 用于身份认证的AppSecret
-     * 默认值：f04e03dba233b36c0eefd68f37de0d60
+     * 默认值：020635e5b412c4d9a2a5bfc5f78855de
      */
-    private String appSecret = "f04e03dba233b36c0eefd68f37de0d60";
+    private String appSecret = "020635e5b412c4d9a2a5bfc5f78855de";
     
     /**
      * 凭据版本
@@ -73,14 +73,40 @@ public class KspSmsProperties {
 
     @Data
     public static class Refresh {
+        // ===== 原有保留：基础刷新开关 =====
         private boolean enabled = false;
+        /** 运行期 tick 间隔（秒），对齐 sms-agent 的 RefreshInterval */
         private long intervalSeconds = 60;
+        /**
+         * 距离过期多久开始触发刷新（秒）。
+         * 当 lifecycleDriven=false 或 DbType==0(静态凭据) 时沿用此绝对值逻辑；
+         * 动态凭据（lifecycleDriven=true + DbType>0）不再使用它，
+         * 改用 renewTtlSeconds × PROACTIVE_RENEW_THRESHOLD_PERCENT 计算窗口。
+         */
         private long leadTimeSeconds = 300;
+        /** 是否对 DbType==0 的静态凭据也执行定时 cipher 检查并按 need_reapply 触发 reapply */
         private boolean refreshStatic = false;
         private boolean datasourceEnabled = true;
         private boolean hikariEnabled = true;
         private boolean validateOnRotate = false;
         private String validationQuery = "SELECT 1";
         private long evictDelayMs = 0;
+
+        // ===== 新增：对齐 K8S sms-agent 动态凭据生命周期策略 =====
+        /**
+         * 每次手动续约希望延长的秒数（renew_ttl）。
+         * 默认 300 秒，建议与服务端该凭据的单轮 ttl 保持一致；
+         * 若 <= 0 则 lifecycle 模式下不会主动 renew，只在 cipher 明确 need_reapply 时才 reapply。
+         */
+        private long renewTtlSeconds = 300L;
+        /** 连续主动续约失败多少次后放弃 renew 直接走 reapply，默认 2 */
+        private int maxRenewFailures = 2;
+        /**
+         * 是否启用"按 cipher 返回的生命周期字段驱动状态机"的新逻辑。
+         * true  = 对齐 sms-agent：cipher → next_action/30%窗口 → renew/reapply → 再 cipher
+         * false = 降级沿用旧逻辑：只按 expireTime - now < leadTimeSeconds 判断刷新
+         * 默认 true；如服务端暂时没部署 renew/reapply 接口可临时关掉走兜底路径。
+         */
+        private boolean lifecycleDriven = true;
     }
 }

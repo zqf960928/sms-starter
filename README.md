@@ -34,7 +34,7 @@
 ```yaml
 ksp:
   sms:
-    url: https://192.168.0.135
+    url: https://192.168.0.130:8390
     domain: 1
     appKey: ad6100957ede7d0c6f090de713da07cbd5
     appSecret: f04e03dba233b36c0eefd68f37de0d60
@@ -119,33 +119,59 @@ app:
 
 ## 项目结构
 
-```
-ksp-sms-spring-boot-starter/
+当前仓库里同时放了 starter 源码、联调测试工程、交付包和调试记录，第一次进入时容易看乱。可以先按下面这几个目录理解：
+
+### 1. Starter 主代码目录
+
+真正的 starter 主代码都在 `src/main` 下：
+
+```text
+ksp-sms/
 ├── src/
 │   ├── main/
-│   │   ├── java/
-│   │   │   ├── com/andang/
-│   │   │   │   ├── CredentialClient.java       # 凭据管理客户端
-│   │   │   │   └── util/                        # 工具类
-│   │   │   └── com/andang/starter/
-│   │   │       ├── KspSmsEnvironmentPostProcessor.java  # 环境后置处理器
-│   │   │       ├── KspSmsAutoConfiguration.java        # 自动配置类
-│   │   │       └── KspSmsProperties.java               # 配置属性类
-│   │   └── resources/
-│   │       └── META-INF/
-│   │           └── spring.factories                  # Spring Boot 自动配置
-│   └── test/                                       # 测试项目
-│       ├── src/
-│       │   ├── main/
-│       │   │   ├── java/
-│       │   │   │   └── com/test/                  # 测试代码
-│       │   │   └── resources/
-│       │   │       └── application.yml           # 测试配置文件
-│       │   └── pom.xml                           # 测试项目依赖
-├── pom.xml                                         # 主项目依赖
-├── README.md                                       # 项目说明
-└── LICENSE                                         # 许可证文件
+│   │   ├── java/com/andang/
+│   │   │   ├── CredentialClient.java              # 调用 SMS 开放接口的客户端
+│   │   │   ├── entity/                            # cipher / renew / reapply 响应实体
+│   │   │   └── util/                              # HTTP、RSA、签名等工具类
+│   │   ├── java/com/andang/starter/
+│   │   │   ├── KspSmsEnvironmentPostProcessor.java # 启动期解密注入
+│   │   │   ├── KspSmsCredentialRefreshManager.java # 运行期 renew / reapply / 回读 cipher
+│   │   │   ├── KspSmsAutoConfiguration.java        # 自动装配
+│   │   │   ├── KspSmsProperties.java               # starter 配置项
+│   │   │   ├── KspSmsCipherScanner.java            # 扫描 SMS{label[:jsonKey]} 引用
+│   │   │   ├── KspSmsRuntimePropertyUpdater.java   # 运行期更新 Environment
+│   │   │   └── KspSmsHikariRefresher.java          # 数据源刷新
+│   │   └── resources/META-INF/                     # Spring Boot 自动装配配置
+│   └── test/java/com/andang/starter/
+│       └── RefreshDecisionLogicTest.java           # 刷新判定逻辑测试
+├── pom.xml                                         # starter 主工程
+└── README.md
 ```
+
+### 2. 你最常看的几个入口文件
+
+- `src/main/java/com/andang/starter/KspSmsEnvironmentPostProcessor.java`
+  负责应用启动时扫描 `SMS{...}` 并解密注入。
+- `src/main/java/com/andang/starter/KspSmsCredentialRefreshManager.java`
+  负责运行期状态机，执行 `fetchCipher -> renew/reapply -> 再 fetchCipher -> 解密 -> 刷新配置/数据源`。
+- `src/main/java/com/andang/CredentialClient.java`
+  负责真正调用 SMS 开放接口，包括 `cipher`、`renew`、`reapply`。
+
+### 3. 容易混淆但不是主代码的目录
+
+- `test/`
+  独立的联调测试工程，用来跑本地示例和调试 starter，不是 starter 主源码目录。
+- `delivery/`
+  交付包目录，包含对外说明文档、示例配置和已打出的 jar。
+- `docs/`
+  项目说明和联调文档。
+- `target/`
+  Maven 构建产物目录，一般不需要手动查看或修改。
+- `.dbg/`、`debug-*.md`
+  调试记录和临时排障材料。
+
+如果只是看 starter 逻辑，建议优先只看 `src/main/java/com/andang/starter` 和
+`src/main/java/com/andang/CredentialClient.java`。
 
 ## 示例代码
 

@@ -1,0 +1,18 @@
+ksp:
+  sms:
+    enabled: true
+    url: ${KSP_SMS_URL:https://192.168.0.130:8390}
+    domain: ${KSP_SMS_DOMAIN:1}
+    appKey: ${KSP_SMS_APP_KEY}
+    appSecret: ${KSP_SMS_APP_SECRET}
+    version: ""
+    cipherPrefix: "SMS{"
+    jsonKey: "value"
+    refresh:
+      enabled: true
+      intervalSeconds: 10
+      lifecycleDriven: true
+      renewTtlSeconds: 300
+      maxRenewFailures: 2
+      datasourceEnabled: true
+      hikariEnabled: true

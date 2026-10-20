@@ -3,22 +3,53 @@ server:
 
 ksp:
   sms:
-    url: https://192.168.0.135
-    domain: 1
-    appKey: ad6100957ede7d0c6f090de713da07cbd5
-    appSecret: f04e03dba233b36c0eefd68f37de0d60
+    # ================================================================
+    #   真实联调时请在下方填入 SMS 服务端的正确配置，
+    #   或通过环境变量覆盖：KSP_SMS_URL / KSP_SMS_DOMAIN / KSP_SMS_APP_KEY / KSP_SMS_APP_SECRET
+    # ================================================================
+    url: ${KSP_SMS_URL:https://192.168.0.130:8390}
+    domain: ${KSP_SMS_DOMAIN:1}
+    appKey: ${KSP_SMS_APP_KEY:ade3d8fec2f10c39dd7912fc59aa18ea1e}
+    appSecret: ${KSP_SMS_APP_SECRET:020635e5b412c4d9a2a5bfc5f78855de}
     version: ""
     enabled: true
     cipherPrefix: SMS{
     jsonKey: value
+    # ================================================================
+    #   运行期刷新（v1.1 新增，对齐 sms-agent label-driven refresh）
+    # ================================================================
+    refresh:
+      # 主开关：true 才会启动 ksp-sms-refresh 线程
+      enabled: true
+      # tick 间隔，最小 5
+      intervalSeconds: 10
+      # lifecycleDriven=false 或静态凭据兜底时使用的提前量
+      leadTimeSeconds: 300
+      # 静态凭据（DbType==0）是否也做 cipher 检查 + need_reapply 时 reapply
+      refreshStatic: true
+      datasourceEnabled: true
+      hikariEnabled: true
+      validateOnRotate: false
+      validationQuery: "SELECT 1"
+      evictDelayMs: 0
+      # v1.1 新增：生命周期驱动新状态机
+      lifecycleDriven: true
+      # 每次主动续约希望延长多少秒；典型 3600；设为 0 关闭主动续约；
+      # 当服务端 label 的 maxTTL 较短时（如 1200s / 1920s），建议把 renewTtlSeconds 调小（如 300-600s），
+      # 否则每次都能先触发【场景B 轻量续约（wouldProactiveRenew 而不是 proactive reapply 场景C
+      renewTtlSeconds: 300
+      # 连续续约失败多少次就放弃 renew 直接 reapply
+      maxRenewFailures: 2
 
 spring:
   datasource:
+    # 动态DB凭据：mysql00（请确保该 label 下的动态凭据已启用 renew/reapply + 设置了合理的 max_ttl 便于观察续约）
     username: SMS{mysql00:username}
     password: SMS{mysql00:password}
 
 app:
   api:
+    # 静态凭据（DbType==0）：refreshStatic=true 时也会定时 cipher，命中 need_reapply 才 reapply
     key: SMS{static00}
     secret: SMS{static01}
     token: SMS{static02}
@@ -29,4 +60,6 @@ app:
 
 logging:
   level:
-    com.andang.starter: info
+    # 调试运行期刷新时建议 DEBUG；生产再改回 INFO
+    com.andang.starter: debug
+    com.andang: debug

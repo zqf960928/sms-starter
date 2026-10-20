@@ -23,24 +23,19 @@
 
 ## 3. 依赖接入
 
-按照项目 README 的方式通过 JitPack 引入（示例仅展示结构，版本请以 tag/release 固化）：
+当前 Starter 的 Maven 坐标如下：
 
 ```xml
-<repository>
-    <id>jitpack.io</id>
-    <url>https://jitpack.io</url>
-</repository>
-
 <dependency>
-    <groupId>com.github.zqf960928</groupId>
-    <artifactId>sms-starter</artifactId>
-    <version>v1.0.0</version>
+    <groupId>com.ad</groupId>
+    <artifactId>ksp-sms-spring-boot-starter</artifactId>
+    <version>1.2.0</version>
 </dependency>
 ```
 
 最佳实践：
 
-- 生产环境务必使用明确版本（tag/release），避免漂移版本
+- 生产环境务必使用明确版本号，避免漂移版本
 - 建议在公司级 parent/BOM 中锁定依赖版本，统一管理
 
 ## 4. 基础配置（ksp.sms）
@@ -126,6 +121,7 @@ Starter 会在 Spring Boot 启动阶段尽早执行：读取应用配置（`appl
 ## 7. 运行期轮转刷新（可选能力）
 
 本项目包含运行期刷新能力，用于应对凭据过期/轮换场景（例如动态数据库凭据）。
+自 v1.1 起，运行期轮转刷新逻辑已**与 K8S sms-agent 的 label-driven refresh 行为完全对齐**（见 sms_k8s 仓库 `sms_agent_label_driven_refresh_plan.md` 与 `src/cmd/sms-agent/main.go`）。
 
 ### 7.1 启用方式
 
@@ -136,27 +132,57 @@ ksp:
   sms:
     refresh:
       enabled: true
-      intervalSeconds: 60
-      leadTimeSeconds: 300
+      # ==== 基础开关（v1.0 已有，v1.1 保留） ====
+      intervalSeconds: 60        # tick 间隔，最小 5
+      leadTimeSeconds: 300       # lifecycleDriven=false 或静态凭据时使用
       refreshStatic: false
       datasourceEnabled: true
       hikariEnabled: true
       validateOnRotate: false
       validationQuery: "SELECT 1"
       evictDelayMs: 0
+      # ==== 新增（v1.1，对齐 sms-agent 动态凭据生命周期策略） ====
+      lifecycleDriven: true      # 主开关：true=新状态机(推荐)，false=旧逻辑降级
+      renewTtlSeconds: 300       # 每次手动续约希望延长的秒数（renew_ttl），建议与服务端单轮 ttl 一致
+      maxRenewFailures: 2        # 连续主动续约失败超限则立即转 reapply
 ```
 
 装配条件：
 
 - 仅当 `ksp.sms.refresh.enabled=true` 时才会启用运行期刷新能力
+- `lifecycleDriven`（默认 true）决定是否启用"对齐 sms-agent 的 cipher→renew/reapply→再 cipher"生命周期状态机
 
-### 7.2 刷新机制说明
+### 7.2 刷新机制说明（v1.1 对齐 sms-agent 的新流程）
 
-- 启动后自动识别配置中涉及的 `SMS{...}` 引用
-- 定时从 SMS 拉取最新凭据：
-  - 根据凭据过期时间与 `leadTimeSeconds` 提前量决定是否需要刷新
-  - `refreshStatic=false` 时，静态凭据不会被重复刷新
-- 刷新后会在运行期更新对应配置键的值（例如 `spring.datasource.username/password`）
+#### 架构边界（与 v1.0 保持不变）
+- **启动阶段 [EnvironmentPostProcessor]**：仅在应用启动时做"一次性解密 + Environment 注入"，不碰任何续约/重新申请逻辑（与用户判断一致）
+- **运行阶段 [KspSmsCredentialRefreshManager]**：每一轮 tick 负责"使用过程中判断续约/重新申请"，本阶段是状态机主流程所在
+
+#### 每轮 tick 的状态机（与 sms-agent 的 `fetchAndDecrypt` 对齐）
+1. **先 fetchCipher**：调 `/open_api/credential/cipher`，同时拿到密文段（`cipher_key/ciphertext`）和全量生命周期字段（`expire_time/created_time/max_ttl/can_renew/need_reapply/next_action/status/status_msg`；若服务端已扩展也可兼容 `id`）
+2. **按优先级决策下一步动作**（对齐 `resolveCipherAction`）：
+   - `Disabled` → 无动作
+   - `next_action` 非空 → 直接走它（优先级最高，use/renew/reapply）
+   - `need_reapply == true` / `can_renew == false` → reapply
+   - 以上都没有但没可用密文 → 优先走 renew
+   - 否则 use（继续用）
+3. **进入主动触发窗口的客户端判断**（对齐 `shouldTriggerProactiveRenew`、`shouldTriggerProactiveReapply`）：
+   - 窗口基数取 `min(renewTtlSeconds, 当前实例初始可用时长)`；当剩余可用期 `<= 窗口基数 × 30%` 时进入主动窗口
+   - 若 `expire_time + renewTtlSeconds > created_time + max_ttl`（下一次续约一定会超过上限）→ 不 renew，直接主动提前 reapply
+   - 每次主动动作后进入 `max(60s, renewTtlSeconds×5%)` 冷却，避免每轮 tick 都刷 renew/reapply
+   - `lifecycleDriven=true` 的动态凭据路径**不再叠加** `leadTimeSeconds`；避免新实例刚创建就因为 `leadTimeSeconds=300` 被误判进入主动窗口
+4. **无论 renew 还是 reapply 成功后，必须再 fetchCipher 回读最新密文**：绝不直接使用 renew/reapply 接口的返回值当凭据正文
+5. **生命周期缓存必须同步刷新**：客户端要把最新 `expire_time / created_time / max_ttl` 写回本地缓存；后续“何时跌破 30% 阈值”的判断，一律基于这组最新生命周期重新计算
+6. **解密比对**：解密后的明文与缓存内容不一致才刷新 Environment + Hikari 连接池，避免无谓的连接抖动
+
+#### 关键错误码与兜底链路
+- **续约失败 code=6130**：`续约时长超过最大有效期限制` → 立即转 reapply，不再重试续约（对齐 sms-agent 的 `isRenewLimitExceededError`）
+- **连续主动续约失败 ≥ `maxRenewFailures`** → 转 reapply
+- **全链路失败**：保持上一轮 cache 不变，等下个 tick 再试，不中断应用
+
+#### 与旧逻辑的关系（`lifecycleDriven`）
+- `lifecycleDriven=true`（默认）：走上述新状态机（推荐）
+- `lifecycleDriven=false`：降级到 v1.0 旧逻辑，只按 `expire_time - now < leadTimeSeconds` 判断；用于服务端暂未部署 renew/reapply 接口的过渡阶段
 
 ### 7.3 数据库连接池热更新（Hikari）
 
@@ -171,6 +197,31 @@ ksp:
 
 - 生产环境建议将 `validateOnRotate` 配合轻量 `validationQuery` 打开，避免切换到无效凭据导致连接池整体不可用
 - `intervalSeconds` 不宜过小，避免频繁登录/拉取造成 SMS 压力
+- 动态凭据建议将 `renewTtlSeconds` 设置为与服务端该凭据单轮 ttl 一致的值；例如 ttl=300 秒，则 `renewTtlSeconds` 也建议设为 300
+- 若客户目标是“旧凭据失效前已经拿到新凭据”，优先使用 `lifecycleDriven=true`，并让客户端在 30% 主动窗口内先 renew、确定不能 renew 再 proactive reapply
+
+### 7.4 新增配置项（v1.1）速查表
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|-------|------|
+| `ksp.sms.refresh.lifecycleDriven` | boolean | `true` | 是否启用对齐 sms-agent 的 cipher→renew/reapply→再 cipher 的生命周期状态机；临时关闭可降级为旧逻辑 |
+| `ksp.sms.refresh.renewTtlSeconds` | long | `300` | 每次主动续约请求延长的秒数（`renew_ttl`）；必须 > 0 才会触发主动续约；建议与服务端该凭据的单轮 ttl 保持一致 |
+| `ksp.sms.refresh.maxRenewFailures` | int | `2` | 连续主动续约失败 ≥ 该值就不再重试续约，直接转 reapply |
+
+原有配置（`intervalSeconds`、`leadTimeSeconds`、`refreshStatic`、`datasourceEnabled`、`hikariEnabled`、`validateOnRotate`、`validationQuery`、`evictDelayMs`）保留不变；
+其中 `leadTimeSeconds` 在 `lifecycleDriven=true` + DbType=动态凭据时不再使用，仅在 `lifecycleDriven=false` 或静态凭据（DbType=0）兜底时生效。
+
+## 7.5 实现文件映射（改造点一览，便于排障）
+
+本次改造涉及的代码位置：
+
+- 新增生命周期响应实体：[CipherLifecycleResult.java](file:///e:/traecn/ksp-sms/src/main/java/com/andang/entity/CipherLifecycleResult.java)
+- 新增 reapply 响应实体：[ReapplyResult.java](file:///e:/traecn/ksp-sms/src/main/java/com/andang/entity/ReapplyResult.java)
+- 新增配置项：`KspSmsProperties.Refresh` 见 [KspSmsProperties.java](file:///e:/traecn/ksp-sms/src/main/java/com/andang/starter/KspSmsProperties.java#L74-L111)
+- 新增接口调用 + token 复用 + RSA 密钥复用：`fetchCipher / renewCredential / reapplyCredential / decryptCipherLifecycle / ensureLogin / isRenewLimitExceeded` 见 [CredentialClient.java](file:///e:/traecn/ksp-sms/src/main/java/com/andang/CredentialClient.java#L432-L661)
+- 运行期状态机主流程：`tickLifecycle / tickLegacy / resolveCipherAction / shouldTriggerProactiveRenew / shouldTriggerProactiveReapply / resolveUsableDeadline / wouldProactiveRenewExceedMaxTTL` 见 [KspSmsCredentialRefreshManager.java](file:///e:/traecn/ksp-sms/src/main/java/com/andang/starter/KspSmsCredentialRefreshManager.java#L130-L697)
+- 启动阶段 `EnvironmentPostProcessor`：**完全未改动**，保持一次性注入语义
+- `KspSmsAutoConfiguration` / `KspSmsCipherScanner`：**完全未改动**，装配条件与扫描逻辑保持一致
 
 ## 8. 安全最佳实践（强制要求）
 
