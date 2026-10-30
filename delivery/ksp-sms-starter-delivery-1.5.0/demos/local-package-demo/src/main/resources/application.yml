@@ -1,0 +1,56 @@
+server:
+  port: 18081
+
+spring:
+  application:
+    name: javasmsadpter
+  datasource:
+    # MySQL 连接地址可直接改这里，也可用环境变量覆盖。
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://192.168.0.130:3307/test?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8&useUnicode=true}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: sms-demo-hikari
+      minimum-idle: 1
+      maximum-pool-size: 4
+      connection-timeout: 10000
+      validation-timeout: 5000
+    username: SMS{mysql-sh:username}
+    password: SMS{mysql-sh:password}
+
+ksp:
+  sms:
+    url: ${KSP_SMS_URL:https://192.168.0.130:8390}
+    domain: ${KSP_SMS_DOMAIN:1}
+    appKey: ${KSP_SMS_APP_KEY:admin}
+    appSecret: ${KSP_SMS_APP_SECRET:9d0022b3e66c87b066890baba1d481954a8b9c5ad3fa12de04596600c7acb5da}
+    version: ${KSP_SMS_VERSION:2}
+    enabled: true
+    cipherPrefix: SMS{
+    jsonKey: value
+    refresh:
+      enabled: true
+      intervalSeconds: 10
+      leadTimeSeconds: 300
+      refreshStatic: true
+      datasourceEnabled: false
+      hikariEnabled: false
+      validateOnRotate: false
+      validationQuery: "SELECT 1"
+      evictDelayMs: 0
+      lifecycleDriven: true
+      renewTtlSeconds: ${KSP_SMS_RENEW_TTL:300}
+      maxRenewFailures: 2
+
+app:
+  demo:
+    dbUserMirror: SMS{mysql-sh:username}
+    dbPassMirror: SMS{mysql-sh:password}
+    tableName: ksp_config
+    businessRefresh:
+      enabled: true
+      intervalMs: 5000
+
+logging:
+  level:
+    com.andang: debug
+    com.andang.starter: debug

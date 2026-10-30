@@ -13,58 +13,34 @@ import org.springframework.core.env.PropertySource;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
 
     private static final String PROPERTY_SOURCE_NAME = "kspSmsPropertySource";
+    private static final int DECRYPT_TIMEOUT_MILLIS = 10000;
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private KspSmsProperties properties;
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
-        // 使用System.out.println替代log.info，因为在环境初始化阶段日志系统可能还未完全就绪
-        System.out.println("KSP SMS EnvironmentPostProcessor started");
-        
         properties = new KspSmsProperties();
         loadPropertiesFromEnvironment(environment, properties);
 
-        System.out.println("KSP SMS properties loaded: url=" + properties.getUrl() + ", domain=" + properties.getDomain() + ", appKey=[REDACTED], enabled=" + properties.isEnabled() + ", cipherPrefix=" + properties.getCipherPrefix());
-
         if (!properties.isEnabled()) {
-            System.out.println("KSP SMS Starter is disabled");
+            log.info("KSP SMS starter is disabled");
             return;
         }
 
-        System.out.println("KSP SMS Starter is enabled, processing encrypted properties");
-
-        // 直接检查几个关键属性
-        String dbUsername = environment.getProperty("spring.datasource.username");
-        String dbPassword = environment.getProperty("spring.datasource.password");
-        String apiKey = environment.getProperty("app.api.key");
-        String apiSecret = environment.getProperty("app.api.secret");
-        String apiToken = environment.getProperty("app.api.token");
-
-        System.out.println("Direct property checks:");
-        System.out.println("spring.datasource.username = " + (dbUsername != null && dbUsername.startsWith(properties.getCipherPrefix()) ? dbUsername : "[REDACTED]"));
-        System.out.println("spring.datasource.password = " + (dbPassword != null && dbPassword.startsWith(properties.getCipherPrefix()) ? dbPassword : "[REDACTED]"));
-        System.out.println("app.api.key = " + (apiKey != null && apiKey.startsWith(properties.getCipherPrefix()) ? apiKey : "[REDACTED]"));
-        System.out.println("app.api.secret = " + (apiSecret != null && apiSecret.startsWith(properties.getCipherPrefix()) ? apiSecret : "[REDACTED]"));
-        System.out.println("app.api.token = " + (apiToken != null && apiToken.startsWith(properties.getCipherPrefix()) ? apiToken : "[REDACTED]"));
-
         Map<String, Object> processedProperties = new HashMap<>();
-        System.out.println("Calling processProperties method");
         processProperties(environment, processedProperties);
-        System.out.println("processProperties method returned with " + processedProperties.size() + " processed properties");
 
         if (!processedProperties.isEmpty()) {
             PropertySource<?> propertySource = new MapPropertySource(PROPERTY_SOURCE_NAME, processedProperties);
             environment.getPropertySources().addFirst(propertySource);
-            System.out.println("Added KSP SMS property source with " + processedProperties.size() + " processed properties");
-        } else {
-            System.out.println("No encrypted properties found");
         }
-        System.out.println("KSP SMS EnvironmentPostProcessor finished");
+        log.info("KSP SMS startup decryption completed, resolved {} encrypted properties", processedProperties.size());
     }
 
     private void loadPropertiesFromEnvironment(ConfigurableEnvironment environment, KspSmsProperties properties) {
@@ -96,22 +72,11 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
 
     private void processProperties(ConfigurableEnvironment environment, Map<String, Object> processedProperties) {
         String cipherPrefix = properties.getCipherPrefix();
-
-        System.out.println("Starting processProperties method");
-
-        // 遍历所有属性源，自动扫描所有以SMS{开头的属性
-        System.out.println("Number of property sources: " + environment.getPropertySources().size());
         for (PropertySource<?> propertySource : environment.getPropertySources()) {
-            System.out.println("Processing property source: " + propertySource.getName() + ", type: " + propertySource.getClass().getName());
-            
             try {
-                // 检查属性源是否是MapPropertySource或其子类
                 if (propertySource instanceof MapPropertySource) {
                     MapPropertySource mapPropertySource = (MapPropertySource) propertySource;
                     Map<String, Object> sourceMap = mapPropertySource.getSource();
-                    System.out.println("Property source is MapPropertySource with " + sourceMap.size() + " properties");
-                    
-                    // 遍历属性源中的所有属性
                     for (Map.Entry<String, Object> entry : sourceMap.entrySet()) {
                         String key = entry.getKey();
                         Object value = entry.getValue();
@@ -125,20 +90,13 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
                         }
                         
                         if (stringValue != null) {
-                            System.out.println("Checking property: " + key + ", value: " + stringValue);
-                            
-                            // 只检查以cipherPrefix开头且以}结尾的属性
-                            if (stringValue.startsWith(cipherPrefix) && stringValue.endsWith("}")) {
-                                System.out.println("Found encrypted property: " + key + " = " + stringValue);
-                                
-                                // 处理密文，格式为 SMS{密钥ID} 或 SMS{密钥ID:jsonKey}
+                            if (looksLikeCipher(stringValue, cipherPrefix)) {
                                 String content = stringValue.substring(cipherPrefix.length(), stringValue.length() - 1);
                                 String label;
                                 String jsonKey = properties.getJsonKey();
 
-                                // 检查是否包含冒号，用于指定JSON中的key
                                 if (content.contains(":")) {
-                                    String[] parts = content.split(":");
+                                    String[] parts = content.split(":", 2);
                                     label = parts[0];
                                     jsonKey = parts[1];
                                 } else {
@@ -147,25 +105,17 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
 
                                 String plainText = decryptProperty(label, jsonKey);
                                 processedProperties.put(key, plainText);
-                                // 不输出解密后的值，避免敏感信息泄露
-                                System.out.println("Decrypted property: " + key + ", value: [REDACTED]");
                             }
                         } else if (value instanceof Map) {
-                            // 处理嵌套的Map属性
                             processNestedMap(key, (Map<?, ?>) value, cipherPrefix, processedProperties);
                         }
                     }
-                } else {
-                    System.out.println("Property source is not MapPropertySource, skipping");
                 }
             } catch (Exception e) {
-                System.out.println("Failed to process property source: " + propertySource.getName() + ", error: " + e.getMessage());
-                e.printStackTrace();
-                // 继续处理下一个属性源
+                log.warn("KSP SMS skipped one property source during startup decryption");
+                log.debug("KSP SMS property source processing failure", e);
             }
         }
-        
-        System.out.println("processProperties method finished, processed " + processedProperties.size() + " properties");
     }
 
     /**
@@ -185,18 +135,13 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
             }
             
             if (stringValue != null) {
-                // 只检查以cipherPrefix开头且以}结尾的属性
-                if (stringValue.startsWith(cipherPrefix) && stringValue.endsWith("}")) {
-                    System.out.println("Found encrypted property: " + key + " = " + stringValue);
-                    
-                    // 处理密文，格式为 SMS{密钥ID} 或 SMS{密钥ID:jsonKey}
+                if (looksLikeCipher(stringValue, cipherPrefix)) {
                     String content = stringValue.substring(cipherPrefix.length(), stringValue.length() - 1);
                     String label;
                     String jsonKey = properties.getJsonKey();
 
-                    // 检查是否包含冒号，用于指定JSON中的key
                     if (content.contains(":")) {
-                        String[] parts = content.split(":");
+                        String[] parts = content.split(":", 2);
                         label = parts[0];
                         jsonKey = parts[1];
                     } else {
@@ -205,22 +150,16 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
 
                     String plainText = decryptProperty(label, jsonKey);
                     processedProperties.put(key, plainText);
-                    // 不输出解密后的值，避免敏感信息泄露
-                    System.out.println("Decrypted property: " + key + ", value: [REDACTED]");
                 }
             } else if (value instanceof Map) {
-                // 递归处理嵌套的Map
                 processNestedMap(key, (Map<?, ?>) value, cipherPrefix, processedProperties);
             }
         }
     }
 
     private String decryptProperty(String label, String jsonKey) {
-        System.out.println("Starting decryption for label: " + label + ", jsonKey: " + jsonKey);
-        
-        // 创建一个线程来执行解密操作，避免阻塞主线程
-        final String[] result = new String[1];
-        final Exception[] exception = new Exception[1];
+        final AtomicReference<String> result = new AtomicReference<>();
+        final AtomicReference<Exception> exception = new AtomicReference<>();
         
         Thread decryptThread = new Thread(() -> {
             try {
@@ -231,56 +170,53 @@ public class KspSmsEnvironmentPostProcessor implements EnvironmentPostProcessor,
                         properties.getAppSecret(),
                         properties.getVersion()
                 );
-                System.out.println("Created CredentialClient, starting startup credential resolution");
                 KspSmsStartupCredentialResolver resolver = KspSmsStartupCredentialResolver.fromClient(client, properties);
                 String decryptedContent = resolver.resolveDecryptedContent(label);
-                // 不输出解密内容，避免敏感信息泄露
-                System.out.println("Got decrypted content: [REDACTED]");
 
                 try {
                     JsonNode jsonNode = objectMapper.readTree(decryptedContent);
-                    System.out.println("Parsed JSON successfully");
                     if (jsonNode.has(jsonKey)) {
-                        String extractedValue = jsonNode.get(jsonKey).asText();
-                        // 不输出提取的值，避免敏感信息泄露
-                        System.out.println("Extracted value from JSON: " + jsonKey + " -> [REDACTED]");
-                        result[0] = extractedValue;
+                        result.set(jsonNode.get(jsonKey).asText());
                     } else {
-                        System.out.println("JSON does not contain key: " + jsonKey + ", returning full JSON");
-                        result[0] = decryptedContent;
+                        result.set(decryptedContent);
                     }
                 } catch (Exception e) {
-                    System.out.println("Content is not JSON (static credential), using original content");
-                    result[0] = decryptedContent;
+                    result.set(decryptedContent);
                 }
             } catch (Exception e) {
-                exception[0] = e;
+                exception.set(e);
             }
-        });
+        }, "ksp-sms-startup-decrypt");
+        decryptThread.setDaemon(true);
         
         decryptThread.start();
         
-        // 等待解密线程完成，最多等待10秒
         try {
-            decryptThread.join(10000);
+            decryptThread.join(DECRYPT_TIMEOUT_MILLIS);
             
             if (decryptThread.isAlive()) {
-                // 超时，返回原始密文
-                System.out.println("Decryption timeout after 10 seconds");
-                return "SMS{" + label + (jsonKey != null && !jsonKey.equals(properties.getJsonKey()) ? ":" + jsonKey : "") + "}";
-            } else if (exception[0] != null) {
-                // 发生异常，返回原始密文
-                System.out.println("Failed to decrypt property: " + exception[0].getMessage());
-                exception[0].printStackTrace();
-                return "SMS{" + label + (jsonKey != null && !jsonKey.equals(properties.getJsonKey()) ? ":" + jsonKey : "") + "}";
+                log.warn("KSP SMS startup decryption timed out; keeping original placeholder");
+                return toCipherPlaceholder(label, jsonKey);
+            } else if (exception.get() != null) {
+                log.warn("KSP SMS startup decryption failed; keeping original placeholder");
+                log.debug("KSP SMS startup decryption failure", exception.get());
+                return toCipherPlaceholder(label, jsonKey);
             } else {
-                // 解密成功，返回解密结果
-                return result[0];
+                return result.get();
             }
         } catch (InterruptedException e) {
-            System.out.println("Decryption thread interrupted: " + e.getMessage());
-            return "SMS{" + label + (jsonKey != null && !jsonKey.equals(properties.getJsonKey()) ? ":" + jsonKey : "") + "}";
+            Thread.currentThread().interrupt();
+            log.warn("KSP SMS startup decryption interrupted; keeping original placeholder");
+            return toCipherPlaceholder(label, jsonKey);
         }
+    }
+
+    private boolean looksLikeCipher(String value, String cipherPrefix) {
+        return value.startsWith(cipherPrefix) && value.endsWith("}");
+    }
+
+    private String toCipherPlaceholder(String label, String jsonKey) {
+        return "SMS{" + label + (jsonKey != null && !jsonKey.equals(properties.getJsonKey()) ? ":" + jsonKey : "") + "}";
     }
 
     @Override

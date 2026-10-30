@@ -104,7 +104,8 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
             try {
                 this.sharedClient.ensureLogin();
             } catch (Exception e) {
-                log.warn("KSP SMS refresh manager startup login failed, will retry on next tick: {}", e.getMessage());
+                log.warn("KSP SMS refresh manager startup login failed, will retry on next tick");
+                log.debug("KSP SMS refresh manager startup login failure", e);
             }
 
             this.executor = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -136,7 +137,8 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
                 tickLegacy();
             }
         } catch (Exception e) {
-            log.warn("KSP SMS refresh tick failed: {}", e.getMessage());
+            log.warn("KSP SMS refresh tick failed");
+            log.debug("KSP SMS refresh tick failure", e);
         }
     }
 
@@ -175,7 +177,8 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
 
                 applyDecryptedContentToUpdatedProperties(label, references, result.getContent(), updatedProperties);
             } catch (Exception e) {
-                log.warn("legacy refresh failed label={}, keep cached: {}", label, e.getMessage());
+                log.warn("KSP SMS legacy refresh failed, keeping cached credential");
+                log.debug("KSP SMS legacy refresh failure", e);
             }
         }
 
@@ -202,16 +205,17 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
             try {
                 lifecycle = sharedClient.fetchCipher(label);
             } catch (Exception e) {
-                log.warn("fetchCipher failed label={}, keep cached: {}", label, e.getMessage());
+                log.warn("KSP SMS lifecycle refresh fetch failed, keeping cached credential");
+                log.debug("KSP SMS lifecycle refresh fetch failure", e);
                 continue;
             }
             if (lifecycle == null) {
-                log.warn("fetchCipher returned null label={}", label);
+                log.warn("KSP SMS lifecycle refresh returned empty result, keeping cached credential");
                 continue;
             }
             Integer code = lifecycle.getCode();
             if (code != null && code != 0) {
-                log.warn("fetchCipher code!=0 label={} code={} msg={}", label, code, lifecycle.getMsg());
+                log.warn("KSP SMS lifecycle refresh returned non-success code, keeping cached credential");
                 continue;
             }
 
@@ -230,40 +234,23 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
             if (hasUsable) {
                 String windowedAction = resolveWindowedUsableCipherAction(lifecycle);
                 if ("reapply".equals(windowedAction) || shouldTriggerProactiveReapply(cached, lifecycle)) {
-                    if ("reapply".equals(windowedAction)) {
-                        log.info("label {} proactive reapply by lifecycle hint within {}% window (nextAction={} canRenew={} needReapply={} status={} msg={})",
-                                label, PROACTIVE_RENEW_THRESHOLD_PERCENT,
-                                lifecycle.getNextAction(), lifecycle.getCanRenew(), lifecycle.getNeedReapply(),
-                                lifecycle.getStatus(), lifecycle.getStatusMsg());
-                    } else {
-                        // 续约会超过 maxTTL → 主动提前 reapply（对齐 sms-agent 的 shouldTriggerProactiveReapply）
-                        log.info("label {} proactive reapply: expire+renewTTL would exceed created+maxTTL (status={} msg={})",
-                                label, lifecycle.getStatus(), lifecycle.getStatusMsg());
-                    }
+                    log.info("KSP SMS proactive reapply triggered during lifecycle refresh");
                     try {
                         sharedClient.reapplyCredential(label);
                         lifecycle = refetchCipherAfterAction(label, "proactive reapply");
                         hasUsable = hasUsableCipher(lifecycle);
                         if (!hasUsable) {
-                            throw new IllegalStateException("after proactive reapply cipher still unusable label=" + label);
+                            throw new IllegalStateException("after proactive reapply cipher still unusable");
                         }
                         cached = mergeLifecycleIntoCache(label, cached, lifecycle);
                         if (cached != null) cached.lastActionAtSeconds = System.currentTimeMillis() / 1000L;
                     } catch (Exception e) {
-                        log.warn("proactive reapply failed label={}, keep cached: {}", label, e.getMessage());
+                        log.warn("KSP SMS proactive reapply failed, keeping cached credential");
+                        log.debug("KSP SMS proactive reapply failure", e);
                         continue;
                     }
                 } else if ("renew".equals(windowedAction) || shouldTriggerProactiveRenew(cached, lifecycle)) {
-                    if ("renew".equals(windowedAction)) {
-                        log.info("label {} proactive renew by lifecycle hint within {}% window (nextAction={} status={} msg={})",
-                                label, PROACTIVE_RENEW_THRESHOLD_PERCENT,
-                                lifecycle.getNextAction(), lifecycle.getStatus(), lifecycle.getStatusMsg());
-                    } else {
-                        // 进入主动续约窗口（剩余 < renewTTL*30%）+ canRenew=true
-                        log.info("label {} proactive renew (remaining within {}% of renewTTL; status={} msg={})",
-                                label, PROACTIVE_RENEW_THRESHOLD_PERCENT,
-                                lifecycle.getStatus(), lifecycle.getStatusMsg());
-                    }
+                    log.info("KSP SMS proactive renew triggered during lifecycle refresh");
                     long id = cached != null && cached.instanceId > 0L ? cached.instanceId :
                               (lifecycle.getId() != null ? lifecycle.getId() : 0L);
                     long nowSec = System.currentTimeMillis() / 1000L;
@@ -276,11 +263,11 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
                             // renew 之后回读仍无密文：按 next_action 再决策
                             String action = resolveCipherAction(lifecycle);
                             if ("reapply".equals(action)) {
-                                log.warn("label {} after renew back to cipher action=reapply, fallthrough", label);
+                                log.warn("KSP SMS renew fallback switched to reapply");
                                 sharedClient.reapplyCredential(label);
                                 lifecycle = refetchCipherAfterAction(label, "renew-fallback reapply");
                                 hasUsable = hasUsableCipher(lifecycle);
-                                if (!hasUsable) throw new IllegalStateException("after reapply cipher still unusable label=" + label);
+                                if (!hasUsable) throw new IllegalStateException("after reapply cipher still unusable");
                                 cached = mergeLifecycleIntoCache(label, cached, lifecycle);
                                 if (cached != null) cached.lastActionAtSeconds = nowSec;
                             } else {
@@ -292,12 +279,13 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
                         }
                     } catch (Exception e) {
                         if (CredentialClient.isRenewLimitExceeded(e)) {
-                            log.warn("label {} renew hit renew-limit code=6130, fallthrough reapply: {}", label, e.getMessage());
+                            log.warn("KSP SMS renew hit renew limit, switching to reapply");
+                            log.debug("KSP SMS renew limit failure", e);
                             try {
                                 sharedClient.reapplyCredential(label);
                                 lifecycle = refetchCipherAfterAction(label, "renew-6130 reapply");
                                 hasUsable = hasUsableCipher(lifecycle);
-                                if (!hasUsable) throw new IllegalStateException("after renew-6130 reapply cipher still unusable label=" + label);
+                                if (!hasUsable) throw new IllegalStateException("after renew-6130 reapply cipher still unusable");
                                 cached = mergeLifecycleIntoCache(label, cached, lifecycle);
                                 if (cached != null) {
                                     cached.renewConsecutiveFailures = 0;
@@ -305,30 +293,32 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
                                 }
                             } catch (Exception re) {
                                 incrementRenewFailures(cached);
-                                log.warn("reapply after renew-limit failed label={}, keep cached: {}", label, re.getMessage());
+                                log.warn("KSP SMS reapply after renew limit failed, keeping cached credential");
+                                log.debug("KSP SMS reapply after renew limit failure", re);
                                 continue;
                             }
                         } else {
                             incrementRenewFailures(cached);
                             if (cached != null && cached.renewConsecutiveFailures >= properties.getRefresh().getMaxRenewFailures()) {
-                                log.warn("label {} renew consecutive failures={} >= maxRenewFailures, fallthrough reapply",
-                                        label, cached.renewConsecutiveFailures);
+                                log.warn("KSP SMS renew exceeded failure threshold, switching to reapply");
                                 try {
                                     sharedClient.reapplyCredential(label);
                                     lifecycle = refetchCipherAfterAction(label, "renew-failures reapply");
                                     hasUsable = hasUsableCipher(lifecycle);
-                                    if (!hasUsable) throw new IllegalStateException("after renew-failures reapply cipher still unusable label=" + label);
+                                    if (!hasUsable) throw new IllegalStateException("after renew-failures reapply cipher still unusable");
                                     cached = mergeLifecycleIntoCache(label, cached, lifecycle);
                                     if (cached != null) {
                                         cached.renewConsecutiveFailures = 0;
                                         cached.lastActionAtSeconds = nowSec;
                                     }
                                 } catch (Exception re) {
-                                    log.warn("reapply after renew-failures failed label={}, keep cached: {}", label, re.getMessage());
+                                    log.warn("KSP SMS reapply after renew failure threshold failed, keeping cached credential");
+                                    log.debug("KSP SMS reapply after renew failure threshold", re);
                                     continue;
                                 }
                             } else {
-                                log.warn("proactive renew failed label={}, keep cached: {}", label, e.getMessage());
+                                log.warn("KSP SMS proactive renew failed, keeping cached credential");
+                                log.debug("KSP SMS proactive renew failure", e);
                                 continue;
                             }
                         }
@@ -343,11 +333,12 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
                 try {
                     decrypted = sharedClient.decryptCipherLifecycle(lifecycle);
                 } catch (Exception e) {
-                    log.warn("decryptCipherLifecycle failed label={}, keep cached: {}", label, e.getMessage());
+                    log.warn("KSP SMS credential decrypt failed during refresh, keeping cached credential");
+                    log.debug("KSP SMS credential decrypt failure during refresh", e);
                     continue;
                 }
                 if (decrypted == null) {
-                    log.warn("decryptCipherLifecycle returned null label={}", label);
+                    log.warn("KSP SMS credential decrypt returned empty content, keeping cached credential");
                     continue;
                 }
                 cached = mergeLifecycleIntoCache(label, cached, lifecycle);
@@ -368,21 +359,19 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
             long coolAction = Math.max(60L, renewTTL4 > 0L ? (long) ((double) renewTTL4 * 0.05d) : 60L);
             boolean inCool = cached != null && cached.lastActionAtSeconds > 0L && (nowSec - cached.lastActionAtSeconds) < coolAction;
             if (inCool) {
-                log.debug("label {} no usable cipher, action={} but still in cool {}s (last={}s ago), skip tick",
-                        label, action, coolAction, (nowSec - (cached != null ? cached.lastActionAtSeconds : 0L)));
+                log.debug("KSP SMS lifecycle refresh skipped because cooldown window is still active");
                 continue;
             }
             if ("reapply".equals(action)) {
-                log.info("label {} no usable cipher, action=reapply (status={} msg={})",
-                        label, lifecycle.getStatus(), lifecycle.getStatusMsg());
+                log.info("KSP SMS lifecycle refresh triggered reapply because no usable cipher is available");
                 try {
                     sharedClient.reapplyCredential(label);
                     lifecycle = refetchCipherAfterAction(label, "action=reapply");
                     if (!hasUsableCipher(lifecycle)) {
-                        throw new IllegalStateException("after reapply cipher still unusable label=" + label);
+                        throw new IllegalStateException("after reapply cipher still unusable");
                     }
                     String decrypted = sharedClient.decryptCipherLifecycle(lifecycle);
-                    if (decrypted == null) throw new IllegalStateException("after reapply decrypt null label=" + label);
+                    if (decrypted == null) throw new IllegalStateException("after reapply decrypt returned null");
                     cached = mergeLifecycleIntoCache(label, cached, lifecycle);
                     if (cached != null) cached.lastActionAtSeconds = nowSec;
                     boolean changed = (cached.content == null) || !cached.content.equals(decrypted);
@@ -393,25 +382,23 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
                         applyDecryptedContentToUpdatedProperties(label, references, decrypted, updatedProperties);
                     }
                 } catch (Exception e) {
-                    log.warn("action=reapply flow failed label={}, keep cached: {}", label, e.getMessage());
+                    log.warn("KSP SMS reapply flow failed, keeping cached credential");
+                    log.debug("KSP SMS reapply flow failure", e);
                     continue;
                 }
             } else if ("renew".equals(action)) {
-                log.info("label {} no usable cipher, action=renew (status={} msg={})",
-                        label, lifecycle.getStatus(), lifecycle.getStatusMsg());
+                log.info("KSP SMS lifecycle refresh triggered renew because no usable cipher is available");
                 long id = cached != null && cached.instanceId > 0L ? cached.instanceId :
                           (lifecycle.getId() != null ? lifecycle.getId() : 0L);
                 try {
                     sharedClient.renewCredential(id, label, properties.getRefresh().getRenewTtlSeconds());
                     lifecycle = refetchCipherAfterAction(label, "action=renew");
-                    boolean wroteAction = false;
                     if (hasUsableCipher(lifecycle)) {
                         String decrypted = sharedClient.decryptCipherLifecycle(lifecycle);
-                        if (decrypted == null) throw new IllegalStateException("after renew decrypt null label=" + label);
+                        if (decrypted == null) throw new IllegalStateException("after renew decrypt returned null");
                         cached = mergeLifecycleIntoCache(label, cached, lifecycle);
                         if (cached != null) {
                             cached.lastActionAtSeconds = nowSec;
-                            wroteAction = true;
                         }
                         boolean changed = (cached.content == null) || !cached.content.equals(decrypted);
                         cached.content = decrypted;
@@ -423,16 +410,15 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
                     } else {
                         String fallAction = resolveCipherAction(lifecycle);
                         if ("reapply".equals(fallAction)) {
-                            log.warn("label {} after renew back to cipher action=reapply, fallthrough", label);
+                            log.warn("KSP SMS renew fallback switched to reapply");
                             sharedClient.reapplyCredential(label);
                             lifecycle = refetchCipherAfterAction(label, "renew-fallback reapply (no cipher)");
-                            if (!hasUsableCipher(lifecycle)) throw new IllegalStateException("after reapply cipher still unusable label=" + label);
+                            if (!hasUsableCipher(lifecycle)) throw new IllegalStateException("after reapply cipher still unusable");
                             String decrypted = sharedClient.decryptCipherLifecycle(lifecycle);
-                            if (decrypted == null) throw new IllegalStateException("after reapply decrypt null label=" + label);
+                            if (decrypted == null) throw new IllegalStateException("after reapply decrypt returned null");
                             cached = mergeLifecycleIntoCache(label, cached, lifecycle);
                             if (cached != null) {
                                 cached.lastActionAtSeconds = nowSec;
-                                wroteAction = true;
                             }
                             boolean changed = (cached.content == null) || !cached.content.equals(decrypted);
                             cached.content = decrypted;
@@ -444,13 +430,14 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
                         }
                     }
                 } catch (Exception e) {
-                    log.warn("action=renew flow failed label={}, fallthrough reapply: {}", label, e.getMessage());
+                    log.warn("KSP SMS renew flow failed, switching to reapply");
+                    log.debug("KSP SMS renew flow failure", e);
                     try {
                         sharedClient.reapplyCredential(label);
                         lifecycle = refetchCipherAfterAction(label, "renew-failed fallthrough reapply");
-                        if (!hasUsableCipher(lifecycle)) throw new IllegalStateException("after reapply cipher still unusable label=" + label);
+                        if (!hasUsableCipher(lifecycle)) throw new IllegalStateException("after reapply cipher still unusable");
                         String decrypted = sharedClient.decryptCipherLifecycle(lifecycle);
-                        if (decrypted == null) throw new IllegalStateException("after reapply decrypt null label=" + label);
+                        if (decrypted == null) throw new IllegalStateException("after reapply decrypt returned null");
                         cached = mergeLifecycleIntoCache(label, cached, lifecycle);
                         if (cached != null) {
                             cached.lastActionAtSeconds = nowSec;
@@ -464,7 +451,8 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
                         }
                     } catch (Exception re) {
                         incrementRenewFailures(cached);
-                        log.warn("renew-failed fallthrough reapply failed label={}, keep cached: {}", label, re.getMessage());
+                        log.warn("KSP SMS reapply after renew flow failure failed, keeping cached credential");
+                        log.debug("KSP SMS reapply after renew flow failure", re);
                         continue;
                     }
                 }
@@ -634,11 +622,11 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
     private CipherLifecycleResult refetchCipherAfterAction(String label, String actionDesc) {
         CipherLifecycleResult lc = sharedClient.fetchCipher(label);
         if (lc == null) {
-            throw new RuntimeException(actionDesc + " refetch cipher null label=" + label);
+            throw new RuntimeException(actionDesc + " refetch cipher returned null");
         }
         Integer c = lc.getCode();
         if (c != null && c != 0) {
-            throw new RuntimeException(actionDesc + " refetch cipher code=" + c + " msg=" + lc.getMsg() + " label=" + label);
+            throw new RuntimeException(actionDesc + " refetch cipher returned non-success code");
         }
         return lc;
     }

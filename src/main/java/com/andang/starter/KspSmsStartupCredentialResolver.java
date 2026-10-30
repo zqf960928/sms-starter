@@ -2,6 +2,7 @@ package com.andang.starter;
 
 import com.andang.CredentialClient;
 import com.andang.entity.CipherLifecycleResult;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 启动期冷启动自愈：
@@ -9,6 +10,7 @@ import com.andang.entity.CipherLifecycleResult;
  * 2. 首次拿到不可用实例时，按 renew / reapply 规则先自愈
  * 3. 最终把最新可用明文返回给 EnvironmentPostProcessor 注入 Spring Environment
  */
+@Slf4j
 class KspSmsStartupCredentialResolver {
 
     interface CredentialOperations {
@@ -48,12 +50,13 @@ class KspSmsStartupCredentialResolver {
         try {
             lifecycle = operations.fetchCipher(label);
         } catch (Exception e) {
-            print("Startup fetchCipher failed for label " + label + ", fallback to direct getCredential: " + e.getMessage());
+            log.warn("KSP SMS startup fetchCipher failed; fallback to direct credential retrieval");
+            log.debug("KSP SMS startup fetchCipher failure", e);
             return operations.getCredential(label);
         }
 
         if (!isFetchCipherSuccess(lifecycle)) {
-            print("Startup fetchCipher returned non-zero code for label " + label + ", fallback to direct getCredential");
+            log.warn("KSP SMS startup fetchCipher returned non-zero code; fallback to direct credential retrieval");
             return operations.getCredential(label);
         }
 
@@ -75,30 +78,31 @@ class KspSmsStartupCredentialResolver {
                     operations.renewCredential(id, label, renewTtlSec);
                     return decryptAfterRefetch(label, "startup renew");
                 } catch (Exception renewEx) {
-                    print("Startup renew failed for label " + label + ", fallback to reapply: " + renewEx.getMessage());
+                    log.warn("KSP SMS startup renew failed; fallback to reapply");
+                    log.debug("KSP SMS startup renew failure", renewEx);
                 }
             } else {
-                print("Startup renew_ttl <= 0 for label " + label + ", fallback to reapply");
+                log.warn("KSP SMS startup renew_ttl <= 0; fallback to reapply");
             }
 
             operations.reapplyCredential(label);
             return decryptAfterRefetch(label, "startup renew fallback reapply");
         }
 
-        throw new IllegalStateException("startup fetchCipher returned unusable credential with no recovery action, label=" + label);
+        throw new IllegalStateException("startup fetchCipher returned unusable credential with no recovery action");
     }
 
     private String decryptAfterRefetch(String label, String actionDesc) {
         CipherLifecycleResult lifecycle = operations.fetchCipher(label);
         if (!isFetchCipherSuccess(lifecycle)) {
-            throw new IllegalStateException(actionDesc + " refetch failed label=" + label);
+            throw new IllegalStateException(actionDesc + " refetch failed");
         }
         if (!hasUsableCipher(lifecycle)) {
-            throw new IllegalStateException(actionDesc + " still has no usable cipher label=" + label);
+            throw new IllegalStateException(actionDesc + " still has no usable cipher");
         }
         String decrypted = operations.decryptCipherLifecycle(lifecycle);
         if (decrypted == null) {
-            throw new IllegalStateException(actionDesc + " decrypt returned null label=" + label);
+            throw new IllegalStateException(actionDesc + " decrypt returned null");
         }
         return decrypted;
     }
@@ -150,10 +154,6 @@ class KspSmsStartupCredentialResolver {
         String ciphertext = lifecycle.getCiphertext();
         return cipherKey != null && !cipherKey.isEmpty()
                 && ciphertext != null && !ciphertext.isEmpty();
-    }
-
-    private static void print(String message) {
-        System.out.println(message);
     }
 
     private static final class ClientAdapter implements CredentialOperations {

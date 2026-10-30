@@ -30,16 +30,16 @@ public class KspSmsProperties {
     /**
      * 应用密钥
      * 用于身份认证的AppKey
-     * 默认值：ade3d8fec2f10c39dd7912fc59aa18ea1e
+     * 默认值：空字符串（需由接入方显式提供）
      */
-    private String appKey = "ade3d8fec2f10c39dd7912fc59aa18ea1e";
+    private String appKey = "";
     
     /**
      * 应用密钥
      * 用于身份认证的AppSecret
-     * 默认值：020635e5b412c4d9a2a5bfc5f78855de
+     * 默认值：空字符串（需由接入方显式提供）
      */
-    private String appSecret = "020635e5b412c4d9a2a5bfc5f78855de";
+    private String appSecret = "";
     
     /**
      * 凭据版本

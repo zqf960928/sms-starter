@@ -74,12 +74,11 @@ public class HttpUtils {
             HttpEntity entity = resp.getEntity();
             if (entity == null) throw new RuntimeException("响应体为空");
             String respBody = EntityUtils.toString(entity, "UTF-8");
-            log.debug("HTTP 响应：{}", respBody);
 
             return objectMapper.readValue(respBody, clazz);
         } catch (Exception e) {
-            log.error("发送 POST 请求失败，URL：{}", url, e);
-            throw new RuntimeException(String.format("发送 POST 请求失败，URL：%s", url), e);
+            log.error("发送 POST 请求失败", e);
+            throw new RuntimeException("发送 POST 请求失败", e);
         }
     }
 
@@ -99,7 +98,6 @@ public class HttpUtils {
         // 设置请求体（转 JSON）
         try {
             String json = objectMapper.writeValueAsString(params);
-            log.debug("HTTP 请求体：{}", json);
             post.setEntity(new StringEntity(json, "UTF-8"));
         } catch (Exception e) {
             throw new RuntimeException("参数转 JSON 失败", e);

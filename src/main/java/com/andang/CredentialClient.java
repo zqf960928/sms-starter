@@ -10,18 +10,12 @@ import com.andang.entity.CredentialResult;
  import com.andang.util.SignUtils;
  import com.fasterxml.jackson.databind.JsonNode;
  import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -43,11 +37,6 @@ import java.util.Map;
  */
 @Slf4j
 public class CredentialClient {
-    private static final String DEBUG_SESSION_ID_FALLBACK = "renew-4603";
-    private static final String DEBUG_SERVER_URL_FALLBACK = "http://127.0.0.1:7777/event";
-    private static volatile String debugSessionId = DEBUG_SESSION_ID_FALLBACK;
-    private static volatile String debugServerUrl = DEBUG_SERVER_URL_FALLBACK;
-
     // 凭据管理系统配置
     private String url;
     private int domain;
@@ -238,7 +227,7 @@ public class CredentialClient {
      * @throws RuntimeException 登录失败时抛出异常
      */
     public void login() {
-        log.info("开始登录认证...");
+        log.debug("开始执行 KSP SMS 登录认证");
 
         // 构建请求参数
         Map<String, Object> params = new HashMap<>();
@@ -252,8 +241,7 @@ public class CredentialClient {
 
         // 处理响应
         if (response.getCode() != 0) {
-            throw new RuntimeException(String.format("登录失败，错误码：%d，信息：%s",
-                    response.getCode(), response.getMsg()));
+            throw new RuntimeException(String.format("登录失败，错误码：%d", response.getCode()));
         }
 
         this.token = response.getData().get("token");
@@ -262,7 +250,7 @@ public class CredentialClient {
         }
 
         this.lastLoginAtEpochSeconds = System.currentTimeMillis() / 1000L;
-        log.info("登录认证成功");
+        log.debug("KSP SMS 登录认证成功");
     }
 
     /**
@@ -294,7 +282,7 @@ public class CredentialClient {
      * @throws RuntimeException 获取凭据失败时抛出异常
      */
     public String getCredential(String label) {
-        log.info("开始获取凭据，标签：{}", label);
+        log.debug("开始获取凭据");
         if (token == null || token.isEmpty()) {
             throw new RuntimeException("请先登录认证");
         }
@@ -327,18 +315,15 @@ public class CredentialClient {
 
             // 2.4 生成签名
             String stringToSign = SignUtils.getStringToSign("POST", headers);
-            log.info("待签名字符串：{}", stringToSign);
             String signature = RsaUtils.sign(stringToSign, privateKey);
             headers.put("Sign-Header", signature);
-            log.info("签名：{}", signature);
             // 2.5 发送请求获取密文
             String requestUrl = url + CIPHER_PATH;
             GetCipherResponse response = HttpUtils.postJson(requestUrl, headers, params, GetCipherResponse.class);
 
             // 2.6 处理响应
             if (response.getCode() != 0) {
-                throw new RuntimeException(String.format("获取凭据失败，错误码：%d，信息：%s",
-                        response.getCode(), response.getMsg()));
+                throw new RuntimeException(String.format("获取凭据失败，错误码：%d", response.getCode()));
             }
 
             // 2.7 解析密文
@@ -391,7 +376,6 @@ public class CredentialClient {
             // 判断凭据类型
             int  dbType = (int) response.getData().get("db_type");
             if (dbType == 0) {
-                log.info("静态凭据类型，值为：[REDACTED]");
                 return;
             }
 
@@ -400,7 +384,6 @@ public class CredentialClient {
             // 设置过期时间
             dbInfo.setExpireTime((int) ( response.getData().get("expire_time")));
 
-            log.info("数据库信息：[REDACTED]");
         } catch (Exception e) {
             log.error("处理解密内容失败", e);
             throw new RuntimeException("处理解密内容失败", e);
@@ -495,36 +478,11 @@ public class CredentialClient {
                 result.setStatus(readText(d, "status"));
                 result.setStatusMsg(readText(d, "status_msg"));
                 result.setId(readLong(d, "id"));
-                log.debug("fetchCipher label={} response raw id_field={} id_node_exists={} id_node_type={} id_val_raw={}",
-                        label,
-                        result.getId(),
-                        d.has("id"),
-                        d.hasNonNull("id") ? d.get("id").getNodeType() : "null",
-                        d.hasNonNull("id") ? d.get("id").asText() : "<null>");
-                // #region debug-point B:cipher-response-id
-                debugReport(resolveDebugRunId(), "B", "CredentialClient.fetchCipher",
-                        "[DEBUG] cipher lifecycle received",
-                        debugData(
-                                "label", label,
-                                "code", result.getCode(),
-                                "msg", result.getMsg(),
-                                "idField", result.getId(),
-                                "idNodeExists", d.has("id"),
-                                "idNodeText", d.hasNonNull("id") ? d.get("id").asText() : null,
-                                "expireTime", result.getExpireTime(),
-                                "createdTime", result.getCreatedTime(),
-                                "maxTtl", result.getMaxTtl(),
-                                "canRenew", result.getCanRenew(),
-                                "needReapply", result.getNeedReapply(),
-                                "nextAction", result.getNextAction(),
-                                "status", result.getStatus()
-                        ));
-                // #endregion
             }
             return result;
         } catch (Exception e) {
-            log.error("fetchCipher 失败 label={}", label, e);
-            throw new RuntimeException("fetchCipher 失败 label=" + label, e);
+            log.error("fetchCipher 失败", e);
+            throw new RuntimeException("fetchCipher 失败", e);
         }
     }
 
@@ -552,18 +510,6 @@ public class CredentialClient {
             }
             params.put("label", label);
             params.put("renew_ttl", renewTtlSec);
-            log.debug("renewCredential label={} id={} body={}", label, id, params);
-            // #region debug-point A:renew-request
-            debugReport(resolveDebugRunId(), "A", "CredentialClient.renewCredential",
-                    "[DEBUG] renew request built",
-                    debugData(
-                            "label", label,
-                            "idArg", id,
-                            "body", params,
-                            "bodyHasId", params.containsKey("id"),
-                            "renewTtl", renewTtlSec
-                    ));
-            // #endregion
 
             String sortedParams = SignUtils.sortJsonKeysByASCII(params);
             String contentSHA256 = SignUtils.calculateSHA256(sortedParams);
@@ -577,45 +523,14 @@ public class CredentialClient {
             String requestUrl = url + RENEW_PATH;
             JsonNode root = HttpUtils.postJson(requestUrl, headers, params, JsonNode.class);
             int code = root.hasNonNull("code") ? root.get("code").asInt() : -1;
-            String msg = root.hasNonNull("msg") ? root.get("msg").asText() : "";
-            // #region debug-point C:renew-response
-            debugReport(resolveDebugRunId(), "C", "CredentialClient.renewCredential",
-                    "[DEBUG] renew response received",
-                    debugData(
-                            "label", label,
-                            "idArg", id,
-                            "bodyHasId", params.containsKey("id"),
-                            "code", code,
-                            "msg", msg
-                    ));
-            // #endregion
             if (code != 0) {
-                throw new RuntimeException(String.format("code=%d msg=%s", code, msg));
+                throw new RuntimeException(String.format("code=%d", code));
             }
         } catch (RuntimeException r) {
-            // #region debug-point E:renew-runtime-exception
-            debugReport(resolveDebugRunId(), "E", "CredentialClient.renewCredential",
-                    "[DEBUG] renew runtime exception",
-                    debugData(
-                            "label", label,
-                            "idArg", id,
-                            "message", r.getMessage()
-                    ));
-            // #endregion
             throw r;
         } catch (Exception e) {
-            log.error("renewCredential 失败 label={}", label, e);
-            // #region debug-point E:renew-exception
-            debugReport(resolveDebugRunId(), "E", "CredentialClient.renewCredential",
-                    "[DEBUG] renew checked exception",
-                    debugData(
-                            "label", label,
-                            "idArg", id,
-                            "type", e.getClass().getName(),
-                            "message", e.getMessage()
-                    ));
-            // #endregion
-            throw new RuntimeException("renewCredential 失败 label=" + label, e);
+            log.error("renewCredential 失败", e);
+            throw new RuntimeException("renewCredential 失败", e);
         }
     }
 
@@ -659,15 +574,14 @@ public class CredentialClient {
                 result.setValue(readText(d, "value"));
             }
             if (result.getCode() != null && result.getCode() != 0) {
-                throw new RuntimeException(String.format("reapply 失败 code=%d msg=%s",
-                        result.getCode(), result.getMsg()));
+                throw new RuntimeException(String.format("reapply 失败 code=%d", result.getCode()));
             }
             return result;
         } catch (RuntimeException r) {
             throw r;
         } catch (Exception e) {
-            log.error("reapplyCredential 失败 label={}", label, e);
-            throw new RuntimeException("reapplyCredential 失败 label=" + label, e);
+            log.error("reapplyCredential 失败", e);
+            throw new RuntimeException("reapplyCredential 失败", e);
         }
     }
 
@@ -690,8 +604,8 @@ public class CredentialClient {
             String plainKeyB64 = Base64.getEncoder().encodeToString(plainKey.getBytes(StandardCharsets.UTF_8));
             return decrypt(ciphertext, plainKeyB64, iv);
         } catch (Exception e) {
-            log.error("decryptCipherLifecycle 失败 label={}", lc.getLabel(), e);
-            throw new RuntimeException("decryptCipherLifecycle 失败 label=" + lc.getLabel(), e);
+            log.error("decryptCipherLifecycle 失败", e);
+            throw new RuntimeException("decryptCipherLifecycle 失败", e);
         }
     }
 
@@ -739,68 +653,4 @@ public class CredentialClient {
         return s.isEmpty() ? null : s;
     }
 
-    private static Map<String, Object> debugData(Object... kvs) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        for (int i = 0; i + 1 < kvs.length; i += 2) {
-            data.put(String.valueOf(kvs[i]), kvs[i + 1]);
-        }
-        return data;
-    }
-
-    private static void debugReport(String runId, String hypothesisId, String location, String msg, Map<String, Object> data) {
-        try {
-            ensureDebugEnv();
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("sessionId", debugSessionId);
-            payload.put("runId", runId);
-            payload.put("hypothesisId", hypothesisId);
-            payload.put("location", location);
-            payload.put("msg", msg);
-            payload.put("data", data);
-            payload.put("ts", System.currentTimeMillis());
-            byte[] body = objectMapper.writeValueAsBytes(payload);
-            HttpURLConnection conn = (HttpURLConnection) new URL(debugServerUrl).openConnection();
-            conn.setRequestMethod("POST");
-            conn.setConnectTimeout(1000);
-            conn.setReadTimeout(1000);
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/json");
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(body);
-            }
-            conn.getResponseCode();
-            conn.disconnect();
-        } catch (Exception ignored) {
-        }
-    }
-
-    private static void ensureDebugEnv() {
-        java.nio.file.Path envPath = Paths.get(".dbg", DEBUG_SESSION_ID_FALLBACK + ".env");
-        if (!Files.exists(envPath)) {
-            return;
-        }
-        try {
-            for (String line : Files.readAllLines(envPath, StandardCharsets.UTF_8)) {
-                if (line.startsWith("DEBUG_SERVER_URL=")) {
-                    debugServerUrl = line.substring("DEBUG_SERVER_URL=".length()).trim();
-                } else if (line.startsWith("DEBUG_SESSION_ID=")) {
-                    debugSessionId = line.substring("DEBUG_SESSION_ID=".length()).trim();
-                }
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private static String resolveDebugRunId() {
-        java.nio.file.Path runIdPath = Paths.get(".dbg", DEBUG_SESSION_ID_FALLBACK + ".runid");
-        if (!Files.exists(runIdPath)) {
-            return "pre-fix";
-        }
-        try {
-            String v = new String(Files.readAllBytes(runIdPath), StandardCharsets.UTF_8).trim();
-            return v.isEmpty() ? "pre-fix" : v;
-        } catch (Exception ignored) {
-            return "pre-fix";
-        }
-    }
 }
