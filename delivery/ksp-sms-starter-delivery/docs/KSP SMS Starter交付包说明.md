@@ -1,4 +1,4 @@
-# KSP SMS Starter交付包说明
+﻿# KSP SMS Starter交付包说明
 
 ## 1. 适用场景
 
@@ -20,7 +20,7 @@ ksp-sms-starter-delivery/
 ├── install-local.bat
 ├── install-local.sh
 ├── artifacts/
-│   ├── ksp-sms-spring-boot-starter-1.2.0.jar
+│   ├── ksp-sms-spring-boot-starter-1.4.0.jar
 │   └── pom.xml
 ├── docs/
 │   ├── KSP SMS Starter使用说明.md
@@ -42,7 +42,7 @@ ksp-sms-starter-delivery/
 - Maven 依赖写法
 - 常见问题
 
-### 3.2 `artifacts/ksp-sms-spring-boot-starter-1.2.0.jar`
+### 3.2 `artifacts/ksp-sms-spring-boot-starter-1.4.0.jar`
 
 Starter 主体 jar 包。
 
@@ -81,7 +81,7 @@ Starter 主体 jar 包。
 
 ## 版本
 - artifactId: ksp-sms-spring-boot-starter
-- version: 1.2.0
+- version: 1.4.0
 
 ## 安装
 ### Windows
@@ -94,7 +94,7 @@ Starter 主体 jar 包。
 <dependency>
     <groupId>com.ad</groupId>
     <artifactId>ksp-sms-spring-boot-starter</artifactId>
-    <version>1.2.0</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
@@ -108,7 +108,7 @@ setlocal
 
 set BASE_DIR=%~dp0
 mvn install:install-file ^
-  -Dfile="%BASE_DIR%artifacts\\ksp-sms-spring-boot-starter-1.2.0.jar" ^
+  -Dfile="%BASE_DIR%artifacts\\ksp-sms-spring-boot-starter-1.4.0.jar" ^
   -DpomFile="%BASE_DIR%artifacts\\pom.xml"
 
 echo.
@@ -125,7 +125,7 @@ set -e
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 mvn install:install-file \
-  -Dfile="${BASE_DIR}/artifacts/ksp-sms-spring-boot-starter-1.2.0.jar" \
+  -Dfile="${BASE_DIR}/artifacts/ksp-sms-spring-boot-starter-1.4.0.jar" \
   -DpomFile="${BASE_DIR}/artifacts/pom.xml"
 
 echo "Installed ksp-sms-spring-boot-starter to local Maven repository."
@@ -159,7 +159,7 @@ mvn -v
 <dependency>
     <groupId>com.ad</groupId>
     <artifactId>ksp-sms-spring-boot-starter</artifactId>
-    <version>1.2.0</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
@@ -204,7 +204,7 @@ ksp:
 ksp-sms-starter-delivery/
 ├── install-local.bat
 ├── artifacts/
-│   ├── ksp-sms-spring-boot-starter-1.2.0.jar
+│   ├── ksp-sms-spring-boot-starter-1.4.0.jar
 │   └── pom.xml
 └── README.md
 ```
@@ -224,3 +224,5 @@ ksp-sms-starter-delivery/
 - Nexus / Artifactory
 
 这样版本管理、升级和依赖分发都会更稳定。
+
+

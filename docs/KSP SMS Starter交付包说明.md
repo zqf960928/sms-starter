@@ -1,4 +1,4 @@
-# KSP SMS Starter交付包说明
+﻿# KSP SMS Starter交付包说明
 
 ## 1. 适用场景
 
@@ -20,14 +20,25 @@ ksp-sms-starter-delivery/
 ├── install-local.bat
 ├── install-local.sh
 ├── artifacts/
-│   ├── ksp-sms-spring-boot-starter-1.2.0.jar
+│   ├── ksp-sms-spring-boot-starter-1.4.0.jar
 │   └── pom.xml
 ├── docs/
 │   ├── KSP SMS Starter使用说明.md
+│   ├── KSP SMS Starter交付包说明.md
 │   ├── SMS动态凭据联调实操说明.md
-│   └── Java spring boot标准框架对接SMS最佳实践.md
-└── examples/
-    └── application.yml.example
+│   ├── Java spring boot标准框架对接SMS最佳实践.md
+│   └── 本地包集成测试手册.md
+├── examples/
+│   └── application.yml.example
+└── demos/
+    ├── local-package-demo/
+    │   ├── pom.xml
+    │   ├── README.md
+    │   └── src/
+    └── jitpack-demo/
+        ├── pom.xml
+        ├── README.md
+        └── src/
 ```
 
 ## 3. 每个文件的作用
@@ -42,7 +53,7 @@ ksp-sms-starter-delivery/
 - Maven 依赖写法
 - 常见问题
 
-### 3.2 `artifacts/ksp-sms-spring-boot-starter-1.2.0.jar`
+### 3.2 `artifacts/ksp-sms-spring-boot-starter-1.4.0.jar`
 
 Starter 主体 jar 包。
 
@@ -76,6 +87,14 @@ Starter 主体 jar 包。
 
 放一份最小可运行配置样例，方便客户或同事快速接入。
 
+### 3.8 `demos/local-package-demo/`
+
+本地包接入 Demo，演示客户通过本地 Maven 仓库安装 starter 后如何接入、如何查看刷新状态、如何由业务侧消费最新凭据。
+
+### 3.9 `demos/jitpack-demo/`
+
+JitPack 接入 Demo，演示客户通过 JitPack 方式依赖 starter 后如何快速验证启动期解密、运行期刷新和业务侧连接池接入。
+
 ## 4. 推荐 README 内容
 
 建议 `README.md` 至少包含以下内容：
@@ -85,7 +104,7 @@ Starter 主体 jar 包。
 
 ## 版本
 - artifactId: ksp-sms-spring-boot-starter
-- version: 1.2.0
+- version: 1.4.0
 
 ## 安装
 ### Windows
@@ -98,7 +117,7 @@ Starter 主体 jar 包。
 <dependency>
     <groupId>com.ad</groupId>
     <artifactId>ksp-sms-spring-boot-starter</artifactId>
-    <version>1.2.0</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
@@ -112,7 +131,7 @@ setlocal
 
 set BASE_DIR=%~dp0
 mvn install:install-file ^
-  -Dfile="%BASE_DIR%artifacts\\ksp-sms-spring-boot-starter-1.2.0.jar" ^
+  -Dfile="%BASE_DIR%artifacts\\ksp-sms-spring-boot-starter-1.4.0.jar" ^
   -DpomFile="%BASE_DIR%artifacts\\pom.xml"
 
 echo.
@@ -129,7 +148,7 @@ set -e
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 mvn install:install-file \
-  -Dfile="${BASE_DIR}/artifacts/ksp-sms-spring-boot-starter-1.2.0.jar" \
+  -Dfile="${BASE_DIR}/artifacts/ksp-sms-spring-boot-starter-1.4.0.jar" \
   -DpomFile="${BASE_DIR}/artifacts/pom.xml"
 
 echo "Installed ksp-sms-spring-boot-starter to local Maven repository."
@@ -161,11 +180,11 @@ mvn -v
 5. Linux/macOS 执行 `sh install-local.sh`
 6. 安装脚本会自动基于脚本所在目录定位 `artifacts/` 下的 jar 和 pom
 7. 安装完成后，在自己项目中加入依赖：
-4. 安装完成后，在自己项目中加入依赖：
+```xml
 <dependency>
     <groupId>com.ad</groupId>
     <artifactId>ksp-sms-spring-boot-starter</artifactId>
-    <version>1.2.0</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
@@ -204,8 +223,10 @@ ksp:
 建议把以下三份一起放进交付包：
 
 - [KSP SMS Starter使用说明.md](file:///E:/traecn/ksp-sms/docs/KSP%20SMS%20Starter%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)
+- [KSP SMS Starter交付包说明.md](file:///E:/traecn/ksp-sms/docs/KSP%20SMS%20Starter%E4%BA%A4%E4%BB%98%E5%8C%85%E8%AF%B4%E6%98%8E.md)
 - [SMS动态凭据联调实操说明.md](file:///E:/traecn/ksp-sms/docs/SMS%E5%8A%A8%E6%80%81%E5%87%AD%E6%8D%AE%E8%81%94%E8%B0%83%E5%AE%9E%E6%93%8D%E8%AF%B4%E6%98%8E.md)
 - [Java spring boot标准框架对接SMS最佳实践.md](file:///E:/traecn/ksp-sms/docs/Java%20spring%20boot%E6%A0%87%E5%87%86%E6%A1%86%E6%9E%B6%E5%AF%B9%E6%8E%A5SMS%E6%9C%80%E4%BD%B3%E5%AE%9E%E8%B7%B5.md)
+- [本地包集成测试手册.md](file:///E:/traecn/javasmsadpter/%E6%9C%AC%E5%9C%B0%E5%8C%85%E9%9B%86%E6%88%90%E6%B5%8B%E8%AF%95%E6%89%8B%E5%86%8C.md)
 
 ## 9. 最简交付版
 
@@ -215,7 +236,7 @@ ksp:
 ksp-sms-starter-delivery/
 ├── install-local.bat
 ├── artifacts/
-│   ├── ksp-sms-spring-boot-starter-1.2.0.jar
+│   ├── ksp-sms-spring-boot-starter-1.4.0.jar
 │   └── pom.xml
 └── README.md
 ```
@@ -235,3 +256,5 @@ ksp-sms-starter-delivery/
 - Nexus / Artifactory
 
 这样版本管理、升级和依赖分发都会更稳定。
+
+

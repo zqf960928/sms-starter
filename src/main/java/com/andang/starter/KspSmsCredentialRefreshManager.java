@@ -224,12 +224,22 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
 
             boolean hasUsable = hasUsableCipher(lifecycle);
 
-            // 步骤 2：有可用密文 → 进入主动判断：是否需要 proactive reapply / proactive renew
+            // 步骤 2：有可用密文 → 进入主动判断：
+            // - 30% 窗口内若服务端已明确给出 renew / reapply 提示，则应提前执行
+            // - 否则再按本地 maxTTL 与主动续约规则兜底
             if (hasUsable) {
-                if (shouldTriggerProactiveReapply(cached, lifecycle)) {
-                    // 续约会超过 maxTTL → 主动提前 reapply（对齐 sms-agent 的 shouldTriggerProactiveReapply）
-                    log.info("label {} proactive reapply: expire+renewTTL would exceed created+maxTTL (status={} msg={})",
-                            label, lifecycle.getStatus(), lifecycle.getStatusMsg());
+                String windowedAction = resolveWindowedUsableCipherAction(lifecycle);
+                if ("reapply".equals(windowedAction) || shouldTriggerProactiveReapply(cached, lifecycle)) {
+                    if ("reapply".equals(windowedAction)) {
+                        log.info("label {} proactive reapply by lifecycle hint within {}% window (nextAction={} canRenew={} needReapply={} status={} msg={})",
+                                label, PROACTIVE_RENEW_THRESHOLD_PERCENT,
+                                lifecycle.getNextAction(), lifecycle.getCanRenew(), lifecycle.getNeedReapply(),
+                                lifecycle.getStatus(), lifecycle.getStatusMsg());
+                    } else {
+                        // 续约会超过 maxTTL → 主动提前 reapply（对齐 sms-agent 的 shouldTriggerProactiveReapply）
+                        log.info("label {} proactive reapply: expire+renewTTL would exceed created+maxTTL (status={} msg={})",
+                                label, lifecycle.getStatus(), lifecycle.getStatusMsg());
+                    }
                     try {
                         sharedClient.reapplyCredential(label);
                         lifecycle = refetchCipherAfterAction(label, "proactive reapply");
@@ -243,11 +253,17 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
                         log.warn("proactive reapply failed label={}, keep cached: {}", label, e.getMessage());
                         continue;
                     }
-                } else if (shouldTriggerProactiveRenew(cached, lifecycle)) {
-                    // 进入主动续约窗口（剩余 < renewTTL*30%）+ canRenew=true
-                    log.info("label {} proactive renew (remaining within {}% of renewTTL; status={} msg={})",
-                            label, PROACTIVE_RENEW_THRESHOLD_PERCENT,
-                            lifecycle.getStatus(), lifecycle.getStatusMsg());
+                } else if ("renew".equals(windowedAction) || shouldTriggerProactiveRenew(cached, lifecycle)) {
+                    if ("renew".equals(windowedAction)) {
+                        log.info("label {} proactive renew by lifecycle hint within {}% window (nextAction={} status={} msg={})",
+                                label, PROACTIVE_RENEW_THRESHOLD_PERCENT,
+                                lifecycle.getNextAction(), lifecycle.getStatus(), lifecycle.getStatusMsg());
+                    } else {
+                        // 进入主动续约窗口（剩余 < renewTTL*30%）+ canRenew=true
+                        log.info("label {} proactive renew (remaining within {}% of renewTTL; status={} msg={})",
+                                label, PROACTIVE_RENEW_THRESHOLD_PERCENT,
+                                lifecycle.getStatus(), lifecycle.getStatusMsg());
+                    }
                     long id = cached != null && cached.instanceId > 0L ? cached.instanceId :
                               (lifecycle.getId() != null ? lifecycle.getId() : 0L);
                     long nowSec = System.currentTimeMillis() / 1000L;
@@ -526,6 +542,20 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
         return wouldProactiveRenewExceedMaxTTL(lc, renewTTL);
     }
 
+    /**
+     * 对仍有可用密文的实例，30% 窗口内应尊重服务端 action hint。
+     * 否则会出现“密文还能用，就一直拖到过期后才 reapply”的现象。
+     */
+    private String resolveWindowedUsableCipherAction(CipherLifecycleResult lc) {
+        if (lc == null || !hasUsableCipher(lc)) return "use";
+        if (!isInProactiveRefreshWindow(lc)) return "use";
+        String action = resolveCipherAction(lc);
+        if ("renew".equals(action) || "reapply".equals(action)) {
+            return action;
+        }
+        return "use";
+    }
+
     /** 对齐 main.go#isInProactiveRefreshWindow (L501-L510)：
      *  窗口内才允许触发主动 renew / proactive reapply。
      *  判定基线对齐 sms-agent：
@@ -538,7 +568,6 @@ public class KspSmsCredentialRefreshManager implements SmartLifecycle, Disposabl
         long renewTTL = properties.getRefresh() != null ? properties.getRefresh().getRenewTtlSeconds() : 0L;
         if (renewTTL <= 0L) return false;
         if (!hasUsableCipher(lc)) return false;
-        if (Boolean.TRUE.equals(lc.getNeedReapply()) || Boolean.FALSE.equals(lc.getCanRenew())) return false;
         if ("Disabled".equalsIgnoreCase(lc.getStatus() != null ? lc.getStatus().trim() : "")) return false;
         Long expireTime = lc.getExpireTime();
         Long createdTime = lc.getCreatedTime();

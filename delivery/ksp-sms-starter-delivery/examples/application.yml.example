@@ -14,5 +14,5 @@ ksp:
       lifecycleDriven: true
       renewTtlSeconds: 300
       maxRenewFailures: 2
-      datasourceEnabled: true
-      hikariEnabled: true
+      datasourceEnabled: false
+      hikariEnabled: false

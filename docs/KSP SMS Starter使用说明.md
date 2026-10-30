@@ -24,7 +24,7 @@
 <dependency>
     <groupId>com.ad</groupId>
     <artifactId>ksp-sms-spring-boot-starter</artifactId>
-    <version>1.2.0</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
@@ -103,6 +103,67 @@ ksp:
 - 如果只希望 starter 提供最新凭据，由业务系统自己更新连接池，建议配置：
   - `datasourceEnabled=false`
   - `hikariEnabled=false`
+
+### 5.1 常用字段含义
+
+下面这组配置是客户最常见、也最容易问到的一组参数：
+
+```yaml
+ksp:
+  sms:
+    url: ${KSP_SMS_URL:https://192.168.0.130:8390}
+    domain: ${KSP_SMS_DOMAIN:1}
+    appKey: ${KSP_SMS_APP_KEY:admin}
+    appSecret: ${KSP_SMS_APP_SECRET:******}
+    version: ${KSP_SMS_VERSION:2}
+    enabled: true
+    cipherPrefix: SMS{
+    jsonKey: value
+    refresh:
+      enabled: true
+      intervalSeconds: 10
+      leadTimeSeconds: 300
+      refreshStatic: true
+      datasourceEnabled: false
+      hikariEnabled: false
+      validateOnRotate: false
+      validationQuery: "SELECT 1"
+      evictDelayMs: 0
+      lifecycleDriven: true
+      renewTtlSeconds: ${KSP_SMS_RENEW_TTL:300}
+      maxRenewFailures: 2
+```
+
+字段说明如下：
+
+- `ksp.sms.url`：SMS 服务地址，starter 启动登录、取密、续约、重申都走这个地址
+- `ksp.sms.domain`：SMS 域 ID，需与平台中的目标域保持一致
+- `ksp.sms.appKey`：SMS 登录账号
+- `ksp.sms.appSecret`：SMS 登录密钥
+- `ksp.sms.version`：短信平台接口版本，当前示例使用 `2`
+- `ksp.sms.enabled`：是否启用 starter；为 `false` 时不执行解密和刷新
+- `ksp.sms.cipherPrefix`：密文占位前缀，默认 `SMS{`
+- `ksp.sms.jsonKey`：当配置写成 `SMS{label}` 且返回值是 JSON 时，默认提取的字段名
+- `ksp.sms.refresh.enabled`：是否启用运行期刷新线程
+- `ksp.sms.refresh.intervalSeconds`：刷新线程轮询周期，单位秒
+- `ksp.sms.refresh.leadTimeSeconds`：旧版提前量参数；在 `lifecycleDriven=false` 或静态凭据路径中作为兜底使用
+- `ksp.sms.refresh.refreshStatic`：是否允许静态凭据参与运行期刷新；动态凭据通常保持 `true`，纯静态场景可按需关闭
+- `ksp.sms.refresh.datasourceEnabled`：是否让 starter 直接更新通用 `DataSource`
+- `ksp.sms.refresh.hikariEnabled`：是否让 starter 直接更新 Hikari 连接池
+- `ksp.sms.refresh.validateOnRotate`：切换数据源参数后是否立即执行校验 SQL
+- `ksp.sms.refresh.validationQuery`：数据源校验 SQL，默认 `SELECT 1`
+- `ksp.sms.refresh.evictDelayMs`：连接驱逐延迟时间，单位毫秒；`0` 表示立即驱逐
+- `ksp.sms.refresh.lifecycleDriven`：是否按动态凭据生命周期字段驱动 `renew / reapply`，动态凭据场景建议开启
+- `ksp.sms.refresh.renewTtlSeconds`：每次主动续约请求的 `renew_ttl`；建议与平台创建实例时的 `ttl` 保持一致
+- `ksp.sms.refresh.maxRenewFailures`：连续主动续约失败达到阈值后，starter 会转为 `reapply`
+
+推荐口径：
+
+- 如果客户希望 `starter` 只负责“提供最新凭据”，建议：
+  - `datasourceEnabled=false`
+  - `hikariEnabled=false`
+  - 由业务自己实现连接池更新
+- 如果客户平台侧创建动态实例时设置了 `ttl=300`，建议 `renewTtlSeconds` 也配置为 `300`
 
 ## 6. 动态凭据运行逻辑
 
@@ -239,3 +300,7 @@ public void autoRefreshIfNeeded() {
 
 - 总体方案与最佳实践：[Java spring boot标准框架对接SMS最佳实践.md](file:///E:/traecn/ksp-sms/docs/Java%20spring%20boot%E6%A0%87%E5%87%86%E6%A1%86%E6%9E%B6%E5%AF%B9%E6%8E%A5SMS%E6%9C%80%E4%BD%B3%E5%AE%9E%E8%B7%B5.md)
 - 联调与实施步骤：[SMS动态凭据联调实操说明.md](file:///E:/traecn/ksp-sms/docs/SMS%E5%8A%A8%E6%80%81%E5%87%AD%E6%8D%AE%E8%81%94%E8%B0%83%E5%AE%9E%E6%93%8D%E8%AF%B4%E6%98%8E.md)
+
+
+
+

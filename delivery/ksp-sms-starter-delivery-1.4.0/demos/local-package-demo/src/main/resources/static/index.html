@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMS Demo Dashboard</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f5f7fb;
+            color: #1f2937;
+        }
+        .page {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        h1 {
+            margin: 0 0 8px;
+            font-size: 28px;
+        }
+        .sub {
+            margin: 0 0 24px;
+            color: #6b7280;
+        }
+        .actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 24px;
+        }
+        button {
+            border: 0;
+            border-radius: 8px;
+            padding: 10px 16px;
+            background: #2563eb;
+            color: #fff;
+            cursor: pointer;
+        }
+        button.secondary {
+            background: #0f766e;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 18px;
+            box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+        }
+        .card h2 {
+            margin: 0 0 12px;
+            font-size: 18px;
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eef2f7;
+            gap: 12px;
+        }
+        .metric:last-child {
+            border-bottom: 0;
+        }
+        .label {
+            color: #6b7280;
+        }
+        .value {
+            text-align: right;
+            word-break: break-all;
+        }
+        .ok {
+            color: #15803d;
+        }
+        .warn {
+            color: #b45309;
+        }
+        .error {
+            color: #b91c1c;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 12px;
+            border-radius: 10px;
+            font-size: 12px;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <h1>SMS Demo Dashboard</h1>
+    <p class="sub">starter 只负责从 SMS 获取和刷新最新凭据，业务连接池是否切换由业务自己决定。</p>
+
+    <div class="actions">
+        <button onclick="loadAll()">刷新页面</button>
+        <button class="secondary" onclick="runRefreshOnce()">触发一次 starter 刷新</button>
+        <button class="secondary" onclick="runBusinessCheckNow()">业务检查一次凭据变化</button>
+        <button class="secondary" onclick="syncBusinessPool()">业务连接池同步最新凭据</button>
+    </div>
+
+    <div class="grid">
+        <div class="card" id="summary-card"></div>
+        <div class="card" id="business-card"></div>
+        <div class="card" id="refresh-card"></div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+        <h2>原始数据</h2>
+        <pre id="raw-json">加载中...</pre>
+    </div>
+</div>
+
+<script>
+    async function getJson(url) {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(url + " -> HTTP " + response.status);
+        }
+        return response.json();
+    }
+
+    function metric(label, value, cls) {
+        return '<div class="metric"><div class="label">' + label + '</div><div class="value ' + (cls || '') + '">' + value + '</div></div>';
+    }
+
+    function renderSummary(data) {
+        const business = data.business || {};
+        const refresh = data.refresh || {};
+        const config = data.config || {};
+        const drift = business.credentialsDrift ? '是' : '否';
+        const count = business.kspConfigCount == null ? '-' : business.kspConfigCount;
+        document.getElementById('summary-card').innerHTML =
+            '<h2>总览</h2>' +
+            metric('starter 当前用户名', config.dbUsernameCurrentEnv || '-') +
+            metric('业务当前用户名', business.businessAppliedUsername || '-') +
+            metric('业务是否落后于 starter', drift, business.credentialsDrift ? 'warn' : 'ok') +
+            metric('业务自动检测', String(!!business.autoRefreshEnabled), business.autoRefreshEnabled ? 'ok' : 'warn') +
+            metric('ksp_config 总记录数', count, 'ok') +
+            metric('业务库名', business.businessDatabase || '-') +
+            metric('业务当前数据库用户', business.businessCurrentUser || '-');
+    }
+
+    function renderBusiness(data) {
+        const business = data.business || {};
+        let html = '<h2>业务连接池</h2>';
+        html += metric('连接池已初始化', String(!!business.businessPoolPresent), business.businessPoolPresent ? 'ok' : 'warn');
+        html += metric('连接是否可用', String(!!business.businessConnected), business.businessConnected ? 'ok' : 'error');
+        html += metric('业务已应用用户名', business.businessAppliedUsername || '-');
+        html += metric('最新环境用户名', business.latestEnvUsername || '-');
+        html += metric('业务连接 URL', business.businessJdbcUrl || business.latestEnvUrl || '-');
+        html += metric('最近同步时间', business.businessAppliedAt || '-');
+        html += metric('自动检测间隔(ms)', business.autoRefreshIntervalMs || '-');
+        html += metric('最近观察时间', business.lastObservedAt || '-');
+        html += metric('最近自动同步时间', business.lastAutoSyncAt || '-');
+        html += metric('最近自动同步结果', business.lastAutoSyncResult || '-');
+        if (business.error) {
+            html += metric('错误', business.error, 'error');
+        }
+        document.getElementById('business-card').innerHTML = html;
+    }
+
+    function renderRefresh(data) {
+        const refresh = data.refresh || {};
+        const cache = refresh.cache || {};
+        const firstKey = Object.keys(cache)[0];
+        const item = firstKey ? cache[firstKey] : {};
+        let html = '<h2>starter 刷新状态</h2>';
+        html += metric('刷新线程运行中', String(!!refresh.running), refresh.running ? 'ok' : 'warn');
+        html += metric('缓存标签数', refresh.cacheSize == null ? '-' : refresh.cacheSize);
+        html += metric('当前标签', firstKey || '-');
+        html += metric('expireTime', item && item.expireTime ? item.expireTime : '-');
+        html += metric('createdTime', item && item.createdTime ? item.createdTime : '-');
+        html += metric('maxTtl', item && item.maxTtl ? item.maxTtl : '-');
+        html += metric('canRenew', item && item.canRenew != null ? String(item.canRenew) : '-');
+        html += metric('needReapply', item && item.needReapply != null ? String(item.needReapply) : '-');
+        document.getElementById('refresh-card').innerHTML = html;
+    }
+
+    async function loadAll() {
+        try {
+            const data = await getJson('/demo/dashboard');
+            renderSummary(data);
+            renderBusiness(data);
+            renderRefresh(data);
+            document.getElementById('raw-json').textContent = JSON.stringify(data, null, 2);
+        } catch (e) {
+            document.getElementById('raw-json').textContent = String(e);
+        }
+    }
+
+    async function runRefreshOnce() {
+        await getJson('/demo/refresh/run-once');
+        await loadAll();
+    }
+
+    async function syncBusinessPool() {
+        await getJson('/demo/business/sync');
+        await loadAll();
+    }
+
+    async function runBusinessCheckNow() {
+        await getJson('/demo/business/check-now');
+        await loadAll();
+    }
+
+    loadAll();
+</script>
+</body>
+</html>

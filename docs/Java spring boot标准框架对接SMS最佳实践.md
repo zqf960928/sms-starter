@@ -1,4 +1,4 @@
-# Java spring boot标准框架对接SMS最佳实践
+﻿# Java spring boot标准框架对接SMS最佳实践
 
 ## 1. 背景与目标
 
@@ -29,7 +29,7 @@
 <dependency>
     <groupId>com.ad</groupId>
     <artifactId>ksp-sms-spring-boot-starter</artifactId>
-    <version>1.2.0</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
@@ -315,3 +315,5 @@ ksp:
 如客户项目使用 Spring Boot 3.x，建议在接入前确认 starter 版本的兼容性策略（例如是否提供 Boot 3 对应版本或适配包）。如需适配，请联系交付方提供对应版本。
 
 以上为兼容性提示，不影响当前文档中“客户如何使用”的接入方式。
+
+

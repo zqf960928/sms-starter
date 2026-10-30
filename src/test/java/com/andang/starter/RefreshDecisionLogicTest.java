@@ -78,6 +78,14 @@ public class RefreshDecisionLogicTest {
         return (Boolean) mtd.invoke(m, cached, lc);
     }
 
+    private static String invokeResolveWindowedUsableCipherAction(KspSmsCredentialRefreshManager m,
+                                                                  CipherLifecycleResult lc) throws Exception {
+        Method mtd = KspSmsCredentialRefreshManager.class.getDeclaredMethod("resolveWindowedUsableCipherAction",
+                CipherLifecycleResult.class);
+        mtd.setAccessible(true);
+        return (String) mtd.invoke(m, lc);
+    }
+
     private static KspSmsCredentialRefreshManager.CachedLabel invokeMergeLifecycleIntoCache(KspSmsCredentialRefreshManager m,
                                                                                              String label,
                                                                                              KspSmsCredentialRefreshManager.CachedLabel cached,
@@ -341,6 +349,57 @@ public class RefreshDecisionLogicTest {
         KspSmsCredentialRefreshManager.CachedLabel cached = buildCached(mgr, now - 120L, 1L, 0);
         boolean r = invokeShouldTriggerProactiveReapply(mgr, cached, lc);
         assertFalse("剩余=1000s 还大，不在窗口内，不应主动提前 reapply（关键频率防刷）", r);
+    }
+
+    @Test
+    public void testWindowedAction_prefersReapplyHintWhenNeedReapplyIsTrue() throws Exception {
+        long now = System.currentTimeMillis() / 1000L;
+        long created = now - 210L;
+        long expire = now + 90L; // 剩余 90s，正好进入 ttl=300 的 30% 窗口
+        CipherLifecycleResult lc = buildActiveLifecycle(created, expire, 600L, true);
+        lc.setNextAction(null);
+        lc.setNeedReapply(true);
+
+        KspSmsCredentialRefreshManager mgr = buildManager(300L, 0L, true);
+        assertEquals("reapply", invokeResolveWindowedUsableCipherAction(mgr, lc));
+    }
+
+    @Test
+    public void testWindowedAction_prefersReapplyHintWhenCanRenewIsFalse() throws Exception {
+        long now = System.currentTimeMillis() / 1000L;
+        long created = now - 210L;
+        long expire = now + 80L; // 已进入 30% 窗口
+        CipherLifecycleResult lc = buildActiveLifecycle(created, expire, 600L, false);
+        lc.setNextAction(null);
+        lc.setNeedReapply(false);
+
+        KspSmsCredentialRefreshManager mgr = buildManager(300L, 0L, true);
+        assertEquals("reapply", invokeResolveWindowedUsableCipherAction(mgr, lc));
+    }
+
+    @Test
+    public void testWindowedAction_usesRenewHintWithinWindow() throws Exception {
+        long now = System.currentTimeMillis() / 1000L;
+        long created = now - 210L;
+        long expire = now + 80L; // 已进入 30% 窗口
+        CipherLifecycleResult lc = buildActiveLifecycle(created, expire, 1200L, true);
+        lc.setNextAction("renew");
+
+        KspSmsCredentialRefreshManager mgr = buildManager(300L, 0L, true);
+        assertEquals("renew", invokeResolveWindowedUsableCipherAction(mgr, lc));
+    }
+
+    @Test
+    public void testWindowedAction_returnsUseOutsideWindowEvenIfNeedReapply() throws Exception {
+        long now = System.currentTimeMillis() / 1000L;
+        long created = now - 10L;
+        long expire = now + 250L; // 剩余 250s，还没到 90s 窗口
+        CipherLifecycleResult lc = buildActiveLifecycle(created, expire, 600L, true);
+        lc.setNeedReapply(true);
+        lc.setNextAction(null);
+
+        KspSmsCredentialRefreshManager mgr = buildManager(300L, 0L, true);
+        assertEquals("use", invokeResolveWindowedUsableCipherAction(mgr, lc));
     }
 
     @Test
